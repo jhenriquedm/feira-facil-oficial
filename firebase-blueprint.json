@@ -1,88 +1,72 @@
 {
   "entities": {
-    "user": {
-      "title": "User",
-      "description": "User profile in the application.",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "email": { "type": "string" },
-        "phone": { "type": "string" },
-        "photoURL": { "type": "string" },
-        "bio": { "type": "string" },
-        "color": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["id", "name", "email"]
-    },
-    "category": {
+    "Category": {
       "title": "Category",
-      "description": "Product category customized or synchronized per user.",
+      "description": "Category for organizing products",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "name": { "type": "string" },
+        "name": { "type": "string", "maxLength": 50 },
         "iconName": { "type": "string" },
         "isActive": { "type": "boolean" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
         "userId": { "type": "string" }
       },
-      "required": ["id", "name", "iconName", "userId"]
+      "required": ["id", "name", "iconName", "isActive", "createdAt", "updatedAt", "userId"]
     },
-    "product": {
+    "Product": {
       "title": "Product",
-      "description": "Product registration with details and latest price snapshot.",
+      "description": "Registered product available in catalog",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "name": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
         "categoryId": { "type": "string" },
         "unit": { "type": "string" },
-        "brand": { "type": "string" },
+        "brand": { "type": "string", "maxLength": 50 },
         "barcode": { "type": "string" },
         "lastPrice": { "type": "number" },
         "isActive": { "type": "boolean" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
         "userId": { "type": "string" }
       },
-      "required": ["id", "name", "categoryId", "unit", "userId"]
+      "required": ["id", "name", "categoryId", "unit", "brand", "lastPrice", "isActive", "createdAt", "updatedAt", "userId"]
     },
-    "purchase": {
+    "Purchase": {
       "title": "Purchase",
-      "description": "A shopping session with metadata and total price status.",
+      "description": "Shopping list or completed purchase",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "name": { "type": "string" },
-        "market": { "type": "string" },
-        "date": { "type": "string", "format": "date-time" },
+        "name": { "type": "string", "maxLength": 100 },
+        "market": { "type": "string", "maxLength": 100 },
+        "date": { "type": "string" },
         "type": { "type": "string", "enum": ["monthly", "weekly", "emergency", "butcher", "pharmacy", "other"] },
+        "notes": { "type": "string", "maxLength": 500 },
         "status": { "type": "string", "enum": ["inProgress", "completed"] },
-        "notes": { "type": "string" },
         "total": { "type": "number" },
         "budget": { "type": "number" },
         "discount": { "type": "number" },
         "additionalFee": { "type": "number" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" },
+        "itemsCount": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
         "userId": { "type": "string" }
       },
-      "required": ["id", "name", "market", "date", "type", "status", "userId"]
+      "required": ["id", "name", "market", "date", "type", "status", "total", "createdAt", "updatedAt", "userId"]
     },
-    "purchase_item": {
-      "title": "Purchase Item",
-      "description": "A snapshot of a product added to a purchase session with current price/quantity.",
+    "PurchaseItem": {
+      "title": "PurchaseItem",
+      "description": "An item belonging to a shopping list / purchase",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "purchaseId": { "type": "string" },
         "productId": { "type": "string" },
-        "productName": { "type": "string" },
-        "productBrand": { "type": "string" },
+        "productName": { "type": "string", "maxLength": 100 },
+        "productBrand": { "type": "string", "maxLength": 50 },
         "categoryId": { "type": "string" },
         "categoryName": { "type": "string" },
         "unit": { "type": "string" },
@@ -91,29 +75,47 @@
         "isChecked": { "type": "boolean" },
         "barcode": { "type": "string" }
       },
-      "required": ["id", "purchaseId", "productId", "productName", "categoryId", "categoryName", "unit", "quantity", "unitPrice"]
+      "required": ["id", "purchaseId", "productId", "productName", "productBrand", "categoryId", "categoryName", "unit", "quantity", "unitPrice", "isChecked"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with optional contact details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string" },
+        "cpf": { "type": "string" },
+        "phone": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "bio": { "type": "string" },
+        "color": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
-    "/users/{userId}": {
-      "schema": "user",
-      "description": "Access to current user profile."
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "The user profile configuration data"
     },
-    "/categories/{categoryId}": {
-      "schema": "category",
-      "description": "Standard or custom categories."
+    "categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Categories created by user for categorizing products"
     },
-    "/products/{productId}": {
-      "schema": "product",
-      "description": "Standard or custom products register."
+    "products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Catalog of products registered by users"
     },
-    "/purchases/{purchaseId}": {
-      "schema": "purchase",
-      "description": "Purchase sessions."
+    "purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/Purchase" },
+      "description": "Purchase logs / shopping list data"
     },
-    "/purchases/{purchaseId}/items/{itemId}": {
-      "schema": "purchase_item",
-      "description": "Items loaded under a specific purchase."
+    "purchases/{purchaseId}/items/{itemId}": {
+      "schema": { "$ref": "#/entities/PurchaseItem" },
+      "description": "Items of a specific purchase"
     }
   }
 }
