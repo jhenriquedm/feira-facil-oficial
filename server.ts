@@ -316,68 +316,163 @@ Diretrizes de Extração:
 
       let productName = '';
       let productBrand = '';
-      let categorySuggestion = '';
-      let unit = 'Un';
+      let categorySuggestion = 'Mercearia';
+      let unit = 'Unidade';
       let found = false;
+      let databaseSource = '';
 
-      // 1. Try querying Open Food Facts API (widely covers Brazilian and global barcodes)
-      try {
-        const offResponse = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`, {
-          headers: {
-            'User-Agent': 'FeiraMensalApp/1.0 (https://ais-dev.run.app)'
-          },
-          signal: AbortSignal.timeout(4500)
-        });
+      // Helper function to extract product info from Open Facts JSON responses
+      const extractOpenFactsData = (p: any, defaultCat: string = 'Mercearia') => {
+        const name = p.product_name_pt || p.product_name || p.generic_name_pt || p.generic_name || '';
+        const brand = p.brands || '';
+        let detectedUnit = 'Unidade';
+        let detectedCat = defaultCat;
 
-        if (offResponse.ok) {
-          const offData: any = await offResponse.json();
-          if (offData && offData.status === 1 && offData.product) {
-            found = true;
-            const p = offData.product;
-            productName = p.product_name_pt || p.product_name || p.generic_name_pt || p.generic_name || '';
-            productBrand = p.brands || '';
-            
-            // Map category tags if available
-            const catHierarchy = (p.categories_tags || []).join(' ').toLowerCase();
-            if (catHierarchy.includes('beverage') || catHierarchy.includes('boisson') || catHierarchy.includes('bebida') || catHierarchy.includes('suco') || catHierarchy.includes('refrigerante') || catHierarchy.includes('água') || catHierarchy.includes('cerveja')) {
-              categorySuggestion = 'Bebidas';
-              unit = 'L';
-            } else if (catHierarchy.includes('meat') || catHierarchy.includes('viande') || catHierarchy.includes('carne') || catHierarchy.includes('frango') || catHierarchy.includes('peixe')) {
-              categorySuggestion = 'Açougue';
-              unit = 'Kg';
-            } else if (catHierarchy.includes('fruit') || catHierarchy.includes('vegetable') || catHierarchy.includes('legume') || catHierarchy.includes('verdura')) {
-              categorySuggestion = 'Hortifruti';
-              unit = 'Kg';
-            } else if (catHierarchy.includes('clean') || catHierarchy.includes('nettoy') || catHierarchy.includes('deterg') || catHierarchy.includes('sabao') || catHierarchy.includes('desinfetante')) {
-              categorySuggestion = 'Limpeza';
-              unit = 'Un';
-            } else if (catHierarchy.includes('dairy') || catHierarchy.includes('lait') || catHierarchy.includes('queijo') || catHierarchy.includes('iogurte') || catHierarchy.includes('manteiga')) {
-              categorySuggestion = 'Laticínios';
-              unit = 'Un';
-            } else if (catHierarchy.includes('bread') || catHierarchy.includes('pain') || catHierarchy.includes('pão') || catHierarchy.includes('biscoito') || catHierarchy.includes('bolo')) {
-              categorySuggestion = 'Padaria';
-              unit = 'Un';
-            } else if (catHierarchy.includes('hygiene') || catHierarchy.includes('shampoo') || catHierarchy.includes('sabonete') || catHierarchy.includes('creme dental')) {
-              categorySuggestion = 'Higiene';
-              unit = 'Un';
-            } else {
+        const catHierarchy = (p.categories_tags || []).join(' ').toLowerCase();
+        if (catHierarchy.includes('beverage') || catHierarchy.includes('boisson') || catHierarchy.includes('bebida') || catHierarchy.includes('suco') || catHierarchy.includes('refrigerante') || catHierarchy.includes('água') || catHierarchy.includes('cerveja')) {
+          detectedCat = 'Bebidas';
+          detectedUnit = 'Litros';
+        } else if (catHierarchy.includes('meat') || catHierarchy.includes('viande') || catHierarchy.includes('carne') || catHierarchy.includes('frango') || catHierarchy.includes('peixe')) {
+          detectedCat = 'Açougue';
+          detectedUnit = 'Kg';
+        } else if (catHierarchy.includes('fruit') || catHierarchy.includes('vegetable') || catHierarchy.includes('legume') || catHierarchy.includes('verdura')) {
+          detectedCat = 'Hortifruti';
+          detectedUnit = 'Kg';
+        } else if (catHierarchy.includes('clean') || catHierarchy.includes('nettoy') || catHierarchy.includes('deterg') || catHierarchy.includes('sabao') || catHierarchy.includes('desinfetante')) {
+          detectedCat = 'Limpeza';
+          detectedUnit = 'Unidade';
+        } else if (catHierarchy.includes('dairy') || catHierarchy.includes('lait') || catHierarchy.includes('queijo') || catHierarchy.includes('iogurte') || catHierarchy.includes('manteiga')) {
+          detectedCat = 'Laticínios';
+          detectedUnit = 'Unidade';
+        } else if (catHierarchy.includes('bread') || catHierarchy.includes('pain') || catHierarchy.includes('pão') || catHierarchy.includes('biscoito') || catHierarchy.includes('bolo')) {
+          detectedCat = 'Padaria';
+          detectedUnit = 'Unidade';
+        } else if (catHierarchy.includes('hygiene') || catHierarchy.includes('shampoo') || catHierarchy.includes('sabonete') || catHierarchy.includes('creme dental') || catHierarchy.includes('cosmetic')) {
+          detectedCat = 'Higiene';
+          detectedUnit = 'Unidade';
+        }
+
+        if (p.quantity) {
+          const qLower = String(p.quantity).toLowerCase();
+          if (qLower.includes('kg') || qLower.includes('quilo')) detectedUnit = 'Kg';
+          else if (qLower.includes(' g') || qLower.endsWith('g')) detectedUnit = 'Grama';
+          else if (qLower.includes(' l') || qLower.endsWith('l') || qLower.includes('litro')) detectedUnit = 'Litros';
+        }
+
+        return { name, brand, categorySuggestion: detectedCat, unit: detectedUnit };
+      };
+
+      // 1. Bluesoft Cosmos API (Official Brazilian retail catalog if COSMOS_TOKEN is configured)
+      const cosmosToken = process.env.COSMOS_TOKEN;
+      if (!found && cosmosToken) {
+        try {
+          const cosmosRes = await fetch(`https://api.cosmos.bluesoft.com.br/gtins/${code}`, {
+            headers: {
+              'X-Cosmos-Token': cosmosToken,
+              'User-Agent': 'Cosmos-API-Request'
+            },
+            signal: AbortSignal.timeout(3500)
+          });
+          if (cosmosRes.ok) {
+            const cosmosData: any = await cosmosRes.json();
+            if (cosmosData && (cosmosData.description || cosmosData.name)) {
+              found = true;
+              databaseSource = 'Bluesoft Cosmos';
+              productName = cosmosData.description || cosmosData.name || '';
+              productBrand = cosmosData.brand?.name || '';
               categorySuggestion = 'Mercearia';
-            }
-
-            if (p.quantity) {
-              const qLower = String(p.quantity).toLowerCase();
-              if (qLower.includes('kg') || qLower.includes('quilo')) unit = 'Kg';
-              else if (qLower.includes(' g') || qLower.endsWith('g')) unit = 'G';
-              else if (qLower.includes(' l') || qLower.endsWith('l') || qLower.includes('litro')) unit = 'L';
+              unit = 'Unidade';
             }
           }
+        } catch (e) {
+          // Cosmos lookup error or timeout
         }
-      } catch (e) {
-        // Timeout or network error on Open Food Facts
+      }
+
+      // 2. Open Food Facts (Alimentos, bebidas e mercearia)
+      if (!found) {
+        try {
+          const offResponse = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`, {
+            headers: {
+              'User-Agent': 'FeiraFacil/1.0 (https://ais-dev.run.app)'
+            },
+            signal: AbortSignal.timeout(4500)
+          });
+
+          if (offResponse.ok) {
+            const offData: any = await offResponse.json();
+            if (offData && offData.status === 1 && offData.product) {
+              const data = extractOpenFactsData(offData.product, 'Mercearia');
+              found = true;
+              databaseSource = 'Open Food Facts';
+              productName = data.name;
+              productBrand = data.brand;
+              categorySuggestion = data.categorySuggestion;
+              unit = data.unit;
+            }
+          }
+        } catch (e) {
+          // Timeout or network error on Open Food Facts
+        }
+      }
+
+      // 3. Open Beauty Facts (Higiene pessoal, cosméticos, sabonetes, xampus)
+      if (!found) {
+        try {
+          const obfResponse = await fetch(`https://world.openbeautyfacts.org/api/v2/product/${code}.json`, {
+            headers: {
+              'User-Agent': 'FeiraFacil/1.0 (https://ais-dev.run.app)'
+            },
+            signal: AbortSignal.timeout(4000)
+          });
+
+          if (obfResponse.ok) {
+            const obfData: any = await obfResponse.json();
+            if (obfData && obfData.status === 1 && obfData.product) {
+              const data = extractOpenFactsData(obfData.product, 'Higiene');
+              found = true;
+              databaseSource = 'Open Beauty Facts';
+              productName = data.name;
+              productBrand = data.brand;
+              categorySuggestion = 'Higiene';
+              unit = data.unit;
+            }
+          }
+        } catch (e) {
+          // Open Beauty Facts error
+        }
+      }
+
+      // 4. Open Products Facts (Produtos de limpeza, bazar, utilidades)
+      if (!found) {
+        try {
+          const opfResponse = await fetch(`https://world.openproductsfacts.org/api/v2/product/${code}.json`, {
+            headers: {
+              'User-Agent': 'FeiraFacil/1.0 (https://ais-dev.run.app)'
+            },
+            signal: AbortSignal.timeout(4000)
+          });
+
+          if (opfResponse.ok) {
+            const opfData: any = await opfResponse.json();
+            if (opfData && opfData.status === 1 && opfData.product) {
+              const data = extractOpenFactsData(opfData.product, 'Limpeza');
+              found = true;
+              databaseSource = 'Open Products Facts';
+              productName = data.name;
+              productBrand = data.brand;
+              categorySuggestion = data.categorySuggestion;
+              unit = data.unit;
+            }
+          }
+        } catch (e) {
+          // Open Products Facts error
+        }
       }
 
       return res.json({
         found,
+        databaseSource: databaseSource || (found ? 'Base de Produtos' : null),
         notFoundInOpenFoodFacts: !found,
         barcode: code,
         name: productName,

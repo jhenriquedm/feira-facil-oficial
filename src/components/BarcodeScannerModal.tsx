@@ -41,6 +41,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     category?: string;
     unit?: string;
     found?: boolean;
+    source?: string;
   } | null>(null);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
@@ -92,7 +93,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           brand: data.brand || '',
           category: data.categorySuggestion || '',
           unit: data.unit || 'Unidade',
-          found: Boolean(data.found)
+          found: Boolean(data.found),
+          source: data.databaseSource || undefined
         });
       } else {
         setDetectedResult({
@@ -374,7 +376,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                           Código Identificado
                         </span>
                         <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-200 text-emerald-800 rounded-full flex items-center gap-1">
-                          <Sparkles size={10} /> Base Oficial Encontrada (Open Food Facts)
+                          <Sparkles size={10} /> {detectedResult.source || 'Base Oficial de Produtos'}
                         </span>
                       </div>
                       <p className="font-mono text-xl font-black text-neutral-950 mt-1">
@@ -454,10 +456,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                       <AlertCircle size={22} className="text-amber-600 shrink-0 mt-0.5" />
                       <div>
                         <h4 className="font-extrabold text-sm text-amber-900 leading-snug">
-                          Código não encontrado na Open Food Facts
+                          Código não localizado nas bases de produtos
                         </h4>
                         <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                          O código <strong className="font-mono bg-amber-100/80 px-1 py-0.5 rounded text-amber-950">{detectedResult.barcode}</strong> não foi localizado na base oficial de produtos.
+                          O código <strong className="font-mono bg-amber-100/80 px-1 py-0.5 rounded text-amber-950">{detectedResult.barcode}</strong> não foi localizado nas bases integradas (Open Food Facts, Open Beauty & Products Facts).
                         </p>
                       </div>
                     </div>
