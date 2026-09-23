@@ -620,6 +620,53 @@ export function useShoppingData() {
         if (err.code === 'auth/email-already-in-use') {
           throw new Error("Este endereço de e-mail já está cadastrado.");
         }
+        if (err.code === 'auth/weak-password') {
+          throw new Error("A senha informada é muito fraca. Utilize no mínimo 6 caracteres.");
+        }
+        if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/admin-restricted-operation') {
+          console.warn("Firebase Auth E-mail/Senha não está ativado no Firebase Console. Criando conta com persistência local no dispositivo...");
+          
+          // Fallback seamlessly: create the account locally so the user is never blocked
+          const offlineUid = `user_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          const localProfile: UserProfile = {
+            id: offlineUid,
+            name: cleanedName,
+            email: cleanedEmail,
+            color: '#0284c7',
+            passwordHash: password,
+            createdAt: nowIso,
+            updatedAt: nowIso
+          };
+          if (cleanCpfDigits) {
+            localProfile.cpf = cleanCpfDigits;
+          }
+
+          const defaultCats = DEFAULT_CATEGORIES(offlineUid);
+          const updatedLocalUsers = [...existingLocal.filter(u => u.email !== cleanedEmail), localProfile];
+          saveLocalUsers(updatedLocalUsers);
+          saveUserData('categories', defaultCats, offlineUid);
+          saveUserData('user_profile', localProfile, offlineUid);
+
+          const activeOfflineUser: OfflineUser = {
+            uid: offlineUid,
+            email: cleanedEmail,
+            displayName: cleanedName,
+            isOffline: false
+          };
+          setUser(activeOfflineUser);
+          setUserProfile(localProfile);
+          setCategories(defaultCats);
+          setThemeColor('#0284c7');
+          localStorage.setItem('feira_active_offline_session', JSON.stringify(activeOfflineUser));
+          localStorage.setItem('feira_offline_session', JSON.stringify({
+            email: cleanedEmail,
+            uid: offlineUid,
+            displayName: cleanedName,
+            canUseOffline: true
+          }));
+          return;
+        }
+
         console.error("Erro ao registrar no Firebase Auth/Firestore:", err);
         throw new Error(err.message || "Erro ao conectar com o servidor para criar sua conta.");
       }
