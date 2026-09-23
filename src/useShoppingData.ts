@@ -9,7 +9,8 @@ import {
   query, 
   where, 
   writeBatch,
-  getDocs
+  getDocs,
+  getDoc
 } from 'firebase/firestore';
 import { 
   signInWithPopup, 
@@ -43,6 +44,16 @@ export interface OfflineUser {
 }
 
 export type AuthUser = User | OfflineUser;
+
+export function cleanPayload<T extends Record<string, any>>(obj: T): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const key of Object.keys(obj)) {
+    if (obj[key] !== undefined) {
+      result[key] = obj[key];
+    }
+  }
+  return result;
+}
 
 export function useShoppingData() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -251,7 +262,7 @@ export function useShoppingData() {
               saveUserData('user_profile', fallbackProfile, uid);
 
               // Auto-seed this complete profile to Firestore
-              setDoc(userDocRef, fallbackProfile, { merge: true }).catch(err => {
+              setDoc(userDocRef, cleanPayload(fallbackProfile), { merge: true }).catch(err => {
                 console.warn("Could not auto-seed profile to Firestore:", err);
               });
             }
@@ -469,7 +480,7 @@ export function useShoppingData() {
           saveUserData('user_profile', fallbackProfile, uid);
 
           if (auth.currentUser && auth.currentUser.uid === uid) {
-            setDoc(userDocRef, fallbackProfile, { merge: true }).catch(() => {});
+            setDoc(userDocRef, cleanPayload(fallbackProfile), { merge: true }).catch(() => {});
           }
         }
       },
@@ -676,47 +687,7 @@ export function useShoppingData() {
           throw new Error("A senha informada é muito fraca. Utilize no mínimo 6 caracteres.");
         }
         if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/admin-restricted-operation') {
-          console.warn("Firebase Auth E-mail/Senha não está ativado no Firebase Console. Criando conta com persistência local no dispositivo...");
-          
-          // Fallback seamlessly: create the account locally so the user is never blocked
-          const offlineUid = `user_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-          const localProfile: UserProfile = {
-            id: offlineUid,
-            name: cleanedName,
-            email: cleanedEmail,
-            color: '#0284c7',
-            passwordHash: password,
-            createdAt: nowIso,
-            updatedAt: nowIso
-          };
-          if (cleanCpfDigits) {
-            localProfile.cpf = cleanCpfDigits;
-          }
-
-          const defaultCats = DEFAULT_CATEGORIES(offlineUid);
-          const updatedLocalUsers = [...existingLocal.filter(u => u.email !== cleanedEmail), localProfile];
-          saveLocalUsers(updatedLocalUsers);
-          saveUserData('categories', defaultCats, offlineUid);
-          saveUserData('user_profile', localProfile, offlineUid);
-
-          const activeOfflineUser: OfflineUser = {
-            uid: offlineUid,
-            email: cleanedEmail,
-            displayName: cleanedName,
-            isOffline: false
-          };
-          setUser(activeOfflineUser);
-          setUserProfile(localProfile);
-          setCategories(defaultCats);
-          setThemeColor('#0284c7');
-          localStorage.setItem('feira_active_offline_session', JSON.stringify(activeOfflineUser));
-          localStorage.setItem('feira_offline_session', JSON.stringify({
-            email: cleanedEmail,
-            uid: offlineUid,
-            displayName: cleanedName,
-            canUseOffline: true
-          }));
-          return;
+          throw new Error("O cadastro por E-mail/Senha não está ativado no Firebase Console (Menu Authentication > Sign-in method > Provedor E-mail/senha > Ativar). Ative-o para salvar contas na nuvem ou utilize 'Entrar com o Google'.");
         }
 
         console.error("Erro ao registrar no Firebase Auth/Firestore:", err);
@@ -1025,6 +996,37 @@ export function useShoppingData() {
         displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário',
         canUseOffline: true
       }));
+
+      // Ensure user document and default categories exist in Firestore immediately
+      try {
+        const userDocRef = doc(db, 'users', firebaseUser.uid);
+        const docSnap = await getDoc(userDocRef);
+        const nowIso = new Date().toISOString();
+        if (!docSnap.exists()) {
+          const localUser = getLocalUsers().find(u => u.id === firebaseUser.uid || (firebaseUser.email && u.email?.toLowerCase() === firebaseUser.email.toLowerCase()));
+          const newProfile: UserProfile = {
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || localUser?.name || 'Usuário Google',
+            email: firebaseUser.email || localUser?.email || '',
+            cpf: localUser?.cpf || undefined,
+            photoURL: firebaseUser.photoURL || localUser?.photoURL || undefined,
+            color: localUser?.color || '#0284c7',
+            createdAt: nowIso,
+            updatedAt: nowIso
+          };
+          await setDoc(userDocRef, cleanPayload(newProfile), { merge: true });
+
+          const defaultCats = DEFAULT_CATEGORIES(firebaseUser.uid);
+          const batch = writeBatch(db);
+          defaultCats.forEach(cat => {
+            const catRef = doc(db, 'categories', cat.id);
+            batch.set(catRef, { ...cat, id: cat.id, userId: firebaseUser.uid, createdAt: nowIso, updatedAt: nowIso });
+          });
+          await batch.commit();
+        }
+      } catch (googleSyncErr) {
+        console.warn("Google user Firestore init error:", googleSyncErr);
+      }
     } catch (error) {
       console.error("Erro ao autenticar com Google:", error);
     } finally {

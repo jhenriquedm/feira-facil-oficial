@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyDnM2WVPPUKm091_b1arwoi19JfVxA1RMk",
@@ -13,7 +13,9 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app, "ai-studio-mindflowaiestdio-64cb53c1-43d8-4046-8b7b-600d8d800a18");
+export const db = initializeFirestore(app, {
+  ignoreUndefinedProperties: true
+}, "ai-studio-mindflowaiestdio-64cb53c1-43d8-4046-8b7b-600d8d800a18");
 
 export enum OperationType {
   CREATE = 'create',
