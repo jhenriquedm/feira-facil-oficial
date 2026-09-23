@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Connection health check
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // --- Users Collection ---
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // --- Categories Collection ---
+    match /categories/{categoryId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isOwner(resource.data.userId) && request.resource.data.userId == request.auth.uid;
+      allow delete: if isOwner(resource.data.userId);
+    }
+
+    // --- Products Collection ---
+    match /products/{productId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isOwner(resource.data.userId) && request.resource.data.userId == request.auth.uid;
+      allow delete: if isOwner(resource.data.userId);
+    }
+
+    // --- Purchases Collection ---
+    match /purchases/{purchaseId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isOwner(resource.data.userId) && request.resource.data.userId == request.auth.uid;
+      allow delete: if isOwner(resource.data.userId);
+      
+      // --- Purchase Items Subcollection (Master Gate relation) ---
+      match /items/{itemId} {
+        allow read: if isSignedIn() && 
+          get(/databases/$(database)/documents/purchases/$(purchaseId)).data.userId == request.auth.uid;
+        allow create, update: if isSignedIn() && 
+          get(/databases/$(database)/documents/purchases/$(purchaseId)).data.userId == request.auth.uid;
+        allow delete: if isSignedIn() && 
+          (
+            !exists(/databases/$(database)/documents/purchases/$(purchaseId)) ||
+            get(/databases/$(database)/documents/purchases/$(purchaseId)).data.userId == request.auth.uid
+          );
+      }
+    }
+  }
+}

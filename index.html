@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Feira Fácil - Gestor de Compras Inteligente</title>
+    <meta name="description" content="Um gestor inteligente e offline-first para planejar suas compras de supermercado, com cálculo de preços em tempo real, relatórios detalhados de gastos e sincronização em nuvem." />
+    <meta property="og:title" content="Feira Fácil - Gestor de Compras Inteligente" />
+    <meta property="og:description" content="Um gestor inteligente e offline-first para planejar suas compras de supermercado, com cálculo de preços em tempo real, relatórios detalhados de gastos e sincronização em nuvem." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- PWA & Mobile Web App Meta Tags -->
+    <meta name="theme-color" content="#0284c7" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Feira Fácil" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <script>
+      // Ignore harmless [vite] WebSocket connection errors per AI Studio environment constraints
+      (function() {
+        const _origConsoleError = console.error;
+        console.error = function(...args) {
+          const first = typeof args[0] === 'string' ? args[0] : '';
+          const second = typeof args[1] === 'string' ? args[1] : (args[1] ? String(args[1]) : '');
+          if (
+            (first.includes('[vite]') || first === '[vite]') &&
+            (first.toLowerCase().includes('websocket') ||
+             second.toLowerCase().includes('websocket') ||
+             first.toLowerCase().includes('failed to connect') ||
+             second.toLowerCase().includes('failed to connect') ||
+             second.toLowerCase().includes('not open') ||
+             second.toLowerCase().includes('closed'))
+          ) {
+            return;
+          }
+          _origConsoleError.apply(console, args);
+        };
+      })();
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

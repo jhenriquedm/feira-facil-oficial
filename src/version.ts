@@ -1,0 +1,59 @@
+export interface AppVersionInfo {
+  version: string;
+  buildNumber: number;
+  releaseDate: string;
+  codename: string;
+  minAndroidVersion: string;
+  targetSdkVersion: number;
+  packageId: string;
+  changelog: {
+    version: string;
+    date: string;
+    highlights: string[];
+  }[];
+}
+
+export const APP_VERSION_INFO: AppVersionInfo = {
+  version: '1.3.0',
+  buildNumber: 13,
+  releaseDate: '2026-09-23',
+  codename: 'MercadoFácil Pro',
+  minAndroidVersion: 'Android 8.0 (API 26)',
+  targetSdkVersion: 34,
+  packageId: 'com.mindflow.mercadofacil',
+  changelog: [
+    {
+      version: '1.3.0',
+      date: '2026-09-23',
+      highlights: [
+        'Atalho rápido para cadastro de categorias direto no modal de produto',
+        'Cadastro contínuo: modais de produtos e categorias permanecem abertos após salvar',
+        'Ordenação alfabética em todos os filtros e listas suspensas',
+        'Remoção de botões desnecessários na tela de relatórios e simplificação de ajustes',
+        'Integração nativa de permissões do smartphone para câmera e galeria',
+        'Configuração e preparação completa para geração de APK Android com Capacitor',
+        'Versionamento de sistema integrado com changelog detalhado',
+        'Suíte robusta de testes automatizados e pipeline de CI/CD para GitHub Actions'
+      ]
+    },
+    {
+      version: '1.2.0',
+      date: '2026-09-22',
+      highlights: [
+        'Máscara monetária BRL automática em todos os campos de valores',
+        'Validação e higienização em tempo real de nomes com primeira letra maiúscula',
+        'Bloqueio de exclusão para categorias e produtos em uso',
+        'Tema de cores personalizado estendido globalmente e suporte a CPF único'
+      ]
+    },
+    {
+      version: '1.1.0',
+      date: '2026-09-20',
+      highlights: [
+        'Leitor de código de barras inteligente com busca em banco nacional',
+        'Leitura e digitalização inteligente de cupons fiscais via OCR Gemini',
+        'Sincronização em nuvem e armazenamento local-first offline'
+      ]
+    }
+  ]
+};

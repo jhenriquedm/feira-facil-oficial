@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+:root {
+  --theme-primary: #0284c7;
+}
+
+@theme {
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #ffffff; /* Pure clean white system canvas */
+  color: #1a1a1a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar for high-fidelity dashboards */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.16);
+}
+
+/* Dynamic theme classes and global overrides for theme color consistency across all screens */
+.theme-btn-primary,
+.bg-sky-500,
+.bg-sky-600 {
+  background-color: var(--theme-primary, #0284c7) !important;
+  color: #ffffff !important;
+}
+
+.hover\:bg-sky-600:hover,
+.hover\:bg-sky-500:hover {
+  filter: brightness(0.92);
+}
+
+.theme-text-primary,
+.text-sky-500,
+.text-sky-600 {
+  color: var(--theme-primary, #0284c7) !important;
+}
+
+.theme-border-primary,
+.border-sky-500,
+.border-sky-600 {
+  border-color: var(--theme-primary, #0284c7) !important;
+}
+
+.focus\:ring-sky-500:focus,
+.focus\:ring-sky-600:focus {
+  --tw-ring-color: var(--theme-primary, #0284c7) !important;
+}
+
+.bg-sky-50 {
+  background-color: color-mix(in srgb, var(--theme-primary, #0284c7) 8%, white) !important;
+}
+
+.border-sky-100,
+.border-sky-200,
+.border-sky-300 {
+  border-color: color-mix(in srgb, var(--theme-primary, #0284c7) 30%, transparent) !important;
+}
+
+.shadow-sky-500\/15 {
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--theme-primary, #0284c7) 25%, transparent) !important;
+}
+
+/* Subtle pulse for active elements */
+@keyframes active-pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 0.3; }
+}
+
+.animate-pulse-subtle {
+  animation: active-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Mobile viewport keyboard & safe area helpers */
+.pb-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 640px) {
+  /* Prevent mobile browsers from zooming in and distorting input views on focus */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}

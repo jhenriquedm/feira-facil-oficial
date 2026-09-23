@@ -1,0 +1,119 @@
+{
+  "entities": {
+    "user": {
+      "title": "User",
+      "description": "User profile in the application.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "bio": { "type": "string" },
+        "color": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "email"]
+    },
+    "category": {
+      "title": "Category",
+      "description": "Product category customized or synchronized per user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "iconName": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "name", "iconName", "userId"]
+    },
+    "product": {
+      "title": "Product",
+      "description": "Product registration with details and latest price snapshot.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "unit": { "type": "string" },
+        "brand": { "type": "string" },
+        "barcode": { "type": "string" },
+        "lastPrice": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "name", "categoryId", "unit", "userId"]
+    },
+    "purchase": {
+      "title": "Purchase",
+      "description": "A shopping session with metadata and total price status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "market": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["monthly", "weekly", "emergency", "butcher", "pharmacy", "other"] },
+        "status": { "type": "string", "enum": ["inProgress", "completed"] },
+        "notes": { "type": "string" },
+        "total": { "type": "number" },
+        "budget": { "type": "number" },
+        "discount": { "type": "number" },
+        "additionalFee": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "name", "market", "date", "type", "status", "userId"]
+    },
+    "purchase_item": {
+      "title": "Purchase Item",
+      "description": "A snapshot of a product added to a purchase session with current price/quantity.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "purchaseId": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "productBrand": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "categoryName": { "type": "string" },
+        "unit": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unitPrice": { "type": "number" },
+        "isChecked": { "type": "boolean" },
+        "barcode": { "type": "string" }
+      },
+      "required": ["id", "purchaseId", "productId", "productName", "categoryId", "categoryName", "unit", "quantity", "unitPrice"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "user",
+      "description": "Access to current user profile."
+    },
+    "/categories/{categoryId}": {
+      "schema": "category",
+      "description": "Standard or custom categories."
+    },
+    "/products/{productId}": {
+      "schema": "product",
+      "description": "Standard or custom products register."
+    },
+    "/purchases/{purchaseId}": {
+      "schema": "purchase",
+      "description": "Purchase sessions."
+    },
+    "/purchases/{purchaseId}/items/{itemId}": {
+      "schema": "purchase_item",
+      "description": "Items loaded under a specific purchase."
+    }
+  }
+}

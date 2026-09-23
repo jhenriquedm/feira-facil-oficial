@@ -1,0 +1,6 @@
+{
+  "name": "Feira Fácil - Gestor de Compras Inteligente",
+  "description": "Um gestor inteligente e offline-first para planejar suas compras de supermercado, com cálculo de preços em tempo real, relatórios detalhados de gastos e sincronização em nuvem.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
