@@ -114,7 +114,7 @@ export function useShoppingData() {
     localStorage.setItem(`feira_user_${userId}_${key}`, JSON.stringify(data));
   };
 
-  const loadUserData = (key: string, defaultValue: any, userId: string) => {
+  const loadUserData = <T = any>(key: string, defaultValue: T, userId: string): T => {
     const saved = localStorage.getItem(`feira_user_${userId}_${key}`);
     return saved ? JSON.parse(saved) : defaultValue;
   };
@@ -130,14 +130,14 @@ export function useShoppingData() {
           setUser(parsed);
           
           // Load offline data for this user
-          let localCats = loadUserData('categories', [], parsed.uid);
+          let localCats = loadUserData<Category[]>('categories', [], parsed.uid);
           if (!localCats || localCats.length === 0) {
             localCats = DEFAULT_CATEGORIES(parsed.uid);
             saveUserData('categories', localCats, parsed.uid);
           }
-          const localProds = loadUserData('products', [], parsed.uid);
-          const localPurchases = loadUserData('purchases', [], parsed.uid);
-          const localItems = loadUserData('purchase_items', {}, parsed.uid);
+          const localProds = loadUserData<Product[]>('products', [], parsed.uid);
+          const localPurchases = loadUserData<Purchase[]>('purchases', [], parsed.uid);
+          const localItems = loadUserData<Record<string, PurchaseItem[]>>('purchase_items', {}, parsed.uid);
           const localProfile = loadUserData('user_profile', {
             id: parsed.uid,
             name: parsed.displayName || 'Usuário',
@@ -212,21 +212,48 @@ export function useShoppingData() {
         const unsubProfile = onSnapshot(
           userDocRef,
           (docSnap) => {
+            const localUser = getLocalUsers().find(u => u.id === uid || (firebaseUser.email && u.email?.toLowerCase() === firebaseUser.email.toLowerCase()));
+            const cachedProfile = loadUserData<UserProfile | null>('user_profile', null, uid);
+
             if (docSnap.exists()) {
               const profileData = { id: docSnap.id, ...docSnap.data() } as UserProfile;
-              setUserProfile(profileData);
-              saveUserData('user_profile', profileData, uid);
+              const mergedProfile: UserProfile = {
+                ...profileData,
+                cpf: profileData.cpf || localUser?.cpf || cachedProfile?.cpf || undefined,
+                phone: profileData.phone || localUser?.phone || cachedProfile?.phone || undefined,
+                bio: profileData.bio || localUser?.bio || cachedProfile?.bio || undefined,
+                color: profileData.color || localUser?.color || cachedProfile?.color || '#0284c7'
+              };
+              setUserProfile(mergedProfile);
+              saveUserData('user_profile', mergedProfile, uid);
+
+              // If Firestore was missing CPF but local had it, sync to Firestore
+              if (!profileData.cpf && mergedProfile.cpf) {
+                setDoc(userDocRef, { cpf: mergedProfile.cpf, updatedAt: new Date().toISOString() }, { merge: true }).catch(err => {
+                  console.warn("Could not sync local CPF to Firestore:", err);
+                });
+              }
             } else {
-              const defaultProfile: UserProfile = {
+              const fallbackProfile: UserProfile = {
                 id: uid,
-                name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário',
-                email: firebaseUser.email || '',
-                photoURL: firebaseUser.photoURL || undefined,
-                createdAt: new Date().toISOString(),
+                name: localUser?.name || cachedProfile?.name || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário',
+                email: localUser?.email || cachedProfile?.email || firebaseUser.email || '',
+                cpf: localUser?.cpf || cachedProfile?.cpf || undefined,
+                phone: localUser?.phone || cachedProfile?.phone || undefined,
+                photoURL: localUser?.photoURL || cachedProfile?.photoURL || firebaseUser.photoURL || undefined,
+                bio: localUser?.bio || cachedProfile?.bio || undefined,
+                color: localUser?.color || cachedProfile?.color || '#0284c7',
+                passwordHash: localUser?.passwordHash || cachedProfile?.passwordHash || undefined,
+                createdAt: localUser?.createdAt || cachedProfile?.createdAt || new Date().toISOString(),
                 updatedAt: new Date().toISOString()
               };
-              setUserProfile(defaultProfile);
-              saveUserData('user_profile', defaultProfile, uid);
+              setUserProfile(fallbackProfile);
+              saveUserData('user_profile', fallbackProfile, uid);
+
+              // Auto-seed this complete profile to Firestore
+              setDoc(userDocRef, fallbackProfile, { merge: true }).catch(err => {
+                console.warn("Could not auto-seed profile to Firestore:", err);
+              });
             }
           },
           (error) => {
@@ -405,20 +432,45 @@ export function useShoppingData() {
     const unsubProfile = onSnapshot(
       userDocRef,
       (docSnap) => {
+        const localUser = getLocalUsers().find(u => u.id === uid || (fallbackEmail && u.email?.toLowerCase() === fallbackEmail.toLowerCase()));
+        const cachedProfile = loadUserData<UserProfile | null>('user_profile', null, uid);
+
         if (docSnap.exists()) {
           const profileData = { id: docSnap.id, ...docSnap.data() } as UserProfile;
-          setUserProfile(profileData);
-          saveUserData('user_profile', profileData, uid);
+          const mergedProfile: UserProfile = {
+            ...profileData,
+            cpf: profileData.cpf || localUser?.cpf || cachedProfile?.cpf || undefined,
+            phone: profileData.phone || localUser?.phone || cachedProfile?.phone || undefined,
+            bio: profileData.bio || localUser?.bio || cachedProfile?.bio || undefined,
+            color: profileData.color || localUser?.color || cachedProfile?.color || '#0284c7'
+          };
+          setUserProfile(mergedProfile);
+          saveUserData('user_profile', mergedProfile, uid);
+
+          // If Firestore is missing CPF but local has it, sync to Firestore
+          if (!profileData.cpf && mergedProfile.cpf && auth.currentUser && auth.currentUser.uid === uid) {
+            setDoc(userDocRef, { cpf: mergedProfile.cpf, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
+          }
         } else {
-          const defaultProfile: UserProfile = {
+          const fallbackProfile: UserProfile = {
             id: uid,
-            name: fallbackDisplayName || 'Usuário',
-            email: fallbackEmail || '',
-            createdAt: new Date().toISOString(),
+            name: localUser?.name || cachedProfile?.name || fallbackDisplayName || 'Usuário',
+            email: localUser?.email || cachedProfile?.email || fallbackEmail || '',
+            cpf: localUser?.cpf || cachedProfile?.cpf || undefined,
+            phone: localUser?.phone || cachedProfile?.phone || undefined,
+            photoURL: localUser?.photoURL || cachedProfile?.photoURL || undefined,
+            bio: localUser?.bio || cachedProfile?.bio || undefined,
+            color: localUser?.color || cachedProfile?.color || '#0284c7',
+            passwordHash: localUser?.passwordHash || cachedProfile?.passwordHash || undefined,
+            createdAt: localUser?.createdAt || cachedProfile?.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
-          setUserProfile(defaultProfile);
-          saveUserData('user_profile', defaultProfile, uid);
+          setUserProfile(fallbackProfile);
+          saveUserData('user_profile', fallbackProfile, uid);
+
+          if (auth.currentUser && auth.currentUser.uid === uid) {
+            setDoc(userDocRef, fallbackProfile, { merge: true }).catch(() => {});
+          }
         }
       },
       (error) => {
@@ -771,6 +823,12 @@ export function useShoppingData() {
 
     // 4. If matched through Firestore/Local custom accounts
     if (matchedUser) {
+      if (isOnline && !auth.currentUser) {
+        try {
+          await signInWithEmailAndPassword(auth, cleanedEmail, password);
+        } catch (_) {}
+      }
+
       const offlineUser: OfflineUser = {
         uid: matchedUser.id,
         email: matchedUser.email,
@@ -785,6 +843,7 @@ export function useShoppingData() {
         setThemeColor(matchedUser.color);
       }
 
+      saveUserData('user_profile', matchedUser, matchedUser.id);
       localStorage.setItem('feira_active_offline_session', JSON.stringify(offlineUser));
       localStorage.setItem('feira_offline_session', JSON.stringify({
         email: matchedUser.email,
@@ -1300,10 +1359,10 @@ export function useShoppingData() {
     setIsSyncing(true);
     try {
       const uid = user.uid;
-      const localCats = loadUserData('categories', [], uid);
-      const localProds = loadUserData('products', [], uid);
-      const localPurchases = loadUserData('purchases', [], uid);
-      const localItems = loadUserData('purchase_items', {}, uid);
+      const localCats = loadUserData<Category[]>('categories', [], uid);
+      const localProds = loadUserData<Product[]>('products', [], uid);
+      const localPurchases = loadUserData<Purchase[]>('purchases', [], uid);
+      const localItems = loadUserData<Record<string, PurchaseItem[]>>('purchase_items', {}, uid);
 
       const batch = writeBatch(db);
 

@@ -69,9 +69,28 @@ export function Profile({
   products,
   categories
 }: ProfileProps) {
+  // Robust CPF resolver checking profile and local cache
+  const resolveCpf = (profile: UserProfile | null) => {
+    if (profile?.cpf) return formatCPF(profile.cpf);
+    try {
+      const cached = localStorage.getItem(`feira_user_${user.uid}_user_profile`) || localStorage.getItem(`feira_user_profile_${user.uid}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed?.cpf) return formatCPF(parsed.cpf);
+      }
+      const localUsersRaw = localStorage.getItem('feira_users');
+      if (localUsersRaw) {
+        const users = JSON.parse(localUsersRaw);
+        const match = users.find((u: any) => u.id === user.uid || (user.email && u.email?.toLowerCase() === user.email.toLowerCase()));
+        if (match?.cpf) return formatCPF(match.cpf);
+      }
+    } catch (_) {}
+    return '';
+  };
+
   // Personal Data Form State
   const [name, setName] = useState(userProfile?.name || user.displayName || '');
-  const [cpf, setCpf] = useState(userProfile?.cpf ? formatCPF(userProfile.cpf) : '');
+  const [cpf, setCpf] = useState(resolveCpf(userProfile));
   const [phone, setPhone] = useState(userProfile?.phone || '');
   const [bio, setBio] = useState(userProfile?.bio || '');
   const [color, setColor] = useState(userProfile?.color || '#0284c7');
@@ -149,7 +168,7 @@ export function Profile({
   useEffect(() => {
     if (userProfile) {
       setName(userProfile.name || user.displayName || '');
-      setCpf(userProfile.cpf ? formatCPF(userProfile.cpf) : '');
+      setCpf(resolveCpf(userProfile));
       setPhone(userProfile.phone || '');
       setBio(userProfile.bio || '');
       setColor(userProfile.color || '#0284c7');
