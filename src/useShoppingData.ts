@@ -1558,12 +1558,66 @@ export function useShoppingData() {
     products?: Product[];
     purchases?: Purchase[];
     purchaseItems?: Record<string, PurchaseItem[]>;
+    userProfile?: Partial<UserProfile> | null;
+    preferences?: {
+      defaultMarket?: string;
+      defaultPurchaseType?: string;
+      autoBarcodeScan?: boolean;
+      themeMode?: 'light' | 'dark' | 'system';
+      themeColor?: string;
+    };
   }) => {
     const uid = user ? user.uid : 'guest';
     const newCats = data.categories || [];
     const newProds = data.products || [];
     const newPurs = data.purchases || [];
     const newItems = data.purchaseItems || {};
+
+    // Restore Preferences if present in backup JSON
+    if (data.preferences) {
+      if (data.preferences.defaultMarket !== undefined) {
+        localStorage.setItem('feira_pref_default_market', data.preferences.defaultMarket);
+      }
+      if (data.preferences.defaultPurchaseType !== undefined) {
+        localStorage.setItem('feira_pref_default_type', data.preferences.defaultPurchaseType);
+      }
+      if (data.preferences.autoBarcodeScan !== undefined) {
+        localStorage.setItem('feira_pref_auto_barcode', String(data.preferences.autoBarcodeScan));
+      }
+      if (data.preferences.themeMode) {
+        const mode = data.preferences.themeMode === 'dark' ? 'dark' : 'light';
+        setThemeMode(mode);
+        localStorage.setItem('feira_theme', mode);
+      }
+      if (data.preferences.themeColor) {
+        setThemeColor(data.preferences.themeColor);
+        localStorage.setItem('feira_theme_color', data.preferences.themeColor);
+      }
+    }
+
+    // Restore User Profile if present in backup JSON
+    if (data.userProfile && userProfile) {
+      const updatedProfile: UserProfile = {
+        ...userProfile,
+        name: data.userProfile.name || userProfile.name,
+        cpf: data.userProfile.cpf !== undefined ? data.userProfile.cpf : userProfile.cpf,
+        phone: data.userProfile.phone !== undefined ? data.userProfile.phone : userProfile.phone,
+        bio: data.userProfile.bio !== undefined ? data.userProfile.bio : userProfile.bio,
+        color: data.userProfile.color || userProfile.color,
+        photoURL: data.userProfile.photoURL !== undefined ? data.userProfile.photoURL : userProfile.photoURL,
+        updatedAt: new Date().toISOString()
+      };
+      setUserProfile(updatedProfile);
+      saveUserData('user_profile', updatedProfile, uid);
+
+      if (user && !('isOffline' in user)) {
+        try {
+          await setDoc(doc(db, 'users', uid), updatedProfile, { merge: true });
+        } catch (e) {
+          console.warn("Erro ao restaurar perfil do usuário no Firestore:", e);
+        }
+      }
+    }
 
     if (user && !('isOffline' in user)) {
       setIsSyncing(true);

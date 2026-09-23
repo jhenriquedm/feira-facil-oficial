@@ -24,6 +24,8 @@ interface SettingsProps {
     products?: Product[];
     purchases?: Purchase[];
     purchaseItems?: Record<string, PurchaseItem[]>;
+    userProfile?: any;
+    preferences?: any;
   }) => Promise<void>;
   themeMode: 'light' | 'dark';
   setThemeMode: (mode: 'light' | 'dark') => void;
@@ -143,14 +145,49 @@ export function Settings({
   // Export full JSON Backup
   const handleExportBackup = () => {
     try {
+      const itemsMap = purchaseItems || {};
+      const totalItemsCount = Object.values(itemsMap).reduce((acc, items) => acc + (items?.length || 0), 0);
+      const totalSpent = purchases.reduce((acc, p) => acc + (p.total || 0), 0);
+
       const backupData = {
+        appName: 'Feira Fácil',
         version: APP_VERSION_INFO.version,
         exportedAt: new Date().toISOString(),
-        userEmail: user?.email || 'guest',
+        user: {
+          uid: user?.uid || 'guest',
+          email: user?.email || userProfile?.email || 'guest',
+          displayName: user?.displayName || userProfile?.name || 'Usuário'
+        },
+        userProfile: userProfile ? {
+          id: userProfile.id,
+          name: userProfile.name,
+          email: userProfile.email,
+          cpf: userProfile.cpf || '',
+          phone: userProfile.phone || '',
+          photoURL: userProfile.photoURL || null,
+          bio: userProfile.bio || '',
+          color: userProfile.color || '#0284c7',
+          createdAt: userProfile.createdAt,
+          updatedAt: userProfile.updatedAt
+        } : null,
+        preferences: {
+          defaultMarket: localStorage.getItem('feira_pref_default_market') || defaultMarket,
+          defaultPurchaseType: localStorage.getItem('feira_pref_default_type') || defaultPurchaseType,
+          autoBarcodeScan: localStorage.getItem('feira_pref_auto_barcode') === 'true',
+          themeMode,
+          themeColor
+        },
+        summary: {
+          totalCategories: categories.length,
+          totalProducts: products.length,
+          totalPurchases: purchases.length,
+          totalItems: totalItemsCount,
+          totalSpentAllTime: Number(totalSpent.toFixed(2))
+        },
         categories,
         products,
         purchases,
-        purchaseItems
+        purchaseItems: itemsMap
       };
 
       const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(backupData, null, 2));
@@ -158,13 +195,13 @@ export function Settings({
       downloadAnchor.setAttribute('href', dataStr);
       downloadAnchor.setAttribute(
         'download', 
-        `gestao_compras_backup_${new Date().toISOString().substring(0, 10)}.json`
+        `feira_facil_backup_${new Date().toISOString().substring(0, 10)}.json`
       );
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       document.body.removeChild(downloadAnchor);
 
-      showNotification('Backup completo exportado em arquivo JSON com sucesso!');
+      showNotification('Backup completo (categorias, produtos, listas, itens, perfil e configurações) exportado em JSON com sucesso!');
     } catch (err: any) {
       console.error(err);
       showNotification('Erro ao gerar arquivo de backup.', true);
@@ -190,7 +227,9 @@ export function Settings({
           categories: Array.isArray(parsed.categories) ? parsed.categories : undefined,
           products: Array.isArray(parsed.products) ? parsed.products : undefined,
           purchases: Array.isArray(parsed.purchases) ? parsed.purchases : undefined,
-          purchaseItems: typeof parsed.purchaseItems === 'object' ? parsed.purchaseItems : undefined
+          purchaseItems: typeof parsed.purchaseItems === 'object' ? parsed.purchaseItems : undefined,
+          userProfile: typeof parsed.userProfile === 'object' ? parsed.userProfile : undefined,
+          preferences: typeof parsed.preferences === 'object' ? parsed.preferences : undefined
         });
         showNotification(
           `Backup restaurado com sucesso! (${parsed.categories?.length || 0} categorias, ${parsed.products?.length || 0} produtos e ${parsed.purchases?.length || 0} compras).`
