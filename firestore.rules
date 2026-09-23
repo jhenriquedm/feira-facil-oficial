@@ -31,7 +31,7 @@ service cloud.firestore {
     // Entity-Specific Validation Helpers
     function isValidUserProfile(data) {
       return data.keys().hasAll(['id', 'name', 'email', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'name', 'email', 'cpf', 'phone', 'photoURL', 'bio', 'color', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'name', 'email', 'cpf', 'phone', 'photoURL', 'bio', 'color', 'createdAt', 'updatedAt', 'passwordHash'])
         && data.id == request.auth.uid
         && data.name is string && data.name.size() > 0 && data.name.size() <= 100
         && data.email is string && data.email.size() > 0 && data.email.size() <= 100
@@ -39,7 +39,8 @@ service cloud.firestore {
         && (data.phone == null || (data.phone is string && data.phone.size() <= 20))
         && (data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 500))
         && (data.bio == null || (data.bio is string && data.bio.size() <= 500))
-        && (data.color == null || (data.color is string && data.color.size() <= 7));
+        && (data.color == null || (data.color is string && data.color.size() <= 7))
+        && (data.passwordHash == null || (data.passwordHash is string && data.passwordHash.size() <= 128));
     }
 
     function isValidCategory(data) {

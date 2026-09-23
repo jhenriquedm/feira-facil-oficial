@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   collection, 
   doc, 
@@ -51,8 +51,21 @@ export function useShoppingData() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
+  const listenersCleanupRef = useRef<(() => void) | null>(null);
+
+  const cleanupActiveListeners = useCallback(() => {
+    if (listenersCleanupRef.current) {
+      try {
+        listenersCleanupRef.current();
+      } catch (err) {
+        console.warn("Error cleaning up previous listeners:", err);
+      }
+      listenersCleanupRef.current = null;
+    }
+  }, []);
+  
   // App States
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [categories, setCategories] = useState<Category[]>(() => DEFAULT_CATEGORIES('guest'));
   const [products, setProducts] = useState<Product[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [purchaseItems, setPurchaseItems] = useState<Record<string, PurchaseItem[]>>({});
@@ -108,37 +121,79 @@ export function useShoppingData() {
 
   // Auth monitoring & data loading
   useEffect(() => {
-    // Check if there is an offline session already active in local storage
-    const activeSession = localStorage.getItem('feira_active_offline_session');
-    if (activeSession) {
-      const parsed = JSON.parse(activeSession);
-      setUser(parsed);
-      
-      // Load offline data for this user
-      const localCats = loadUserData('categories', [], parsed.uid);
-      const localProds = loadUserData('products', [], parsed.uid);
-      const localPurchases = loadUserData('purchases', [], parsed.uid);
-      const localItems = loadUserData('purchase_items', {}, parsed.uid);
-      const localProfile = loadUserData('user_profile', {
-        id: parsed.uid,
-        name: parsed.displayName || 'Usuário',
-        email: parsed.email || '',
-        photoURL: parsed.photoURL,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }, parsed.uid);
+    // Helper to load offline session data
+    const loadSessionOffline = () => {
+      const activeSession = localStorage.getItem('feira_active_offline_session');
+      if (activeSession) {
+        try {
+          const parsed = JSON.parse(activeSession);
+          setUser(parsed);
+          
+          // Load offline data for this user
+          let localCats = loadUserData('categories', [], parsed.uid);
+          if (!localCats || localCats.length === 0) {
+            localCats = DEFAULT_CATEGORIES(parsed.uid);
+            saveUserData('categories', localCats, parsed.uid);
+          }
+          const localProds = loadUserData('products', [], parsed.uid);
+          const localPurchases = loadUserData('purchases', [], parsed.uid);
+          const localItems = loadUserData('purchase_items', {}, parsed.uid);
+          const localProfile = loadUserData('user_profile', {
+            id: parsed.uid,
+            name: parsed.displayName || 'Usuário',
+            email: parsed.email || '',
+            photoURL: parsed.photoURL,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }, parsed.uid);
 
-      setCategories(localCats);
-      setProducts(localProds);
-      setPurchases(localPurchases);
-      setPurchaseItems(localItems);
-      setUserProfile(localProfile);
-      setLoading(false);
+          setCategories(localCats);
+          setProducts(localProds);
+          setPurchases(localPurchases);
+          setPurchaseItems(localItems);
+          setUserProfile(localProfile);
+          setLoading(false);
+          return true;
+        } catch (err) {
+          console.warn("Failed to parse local offline session:", err);
+        }
+      }
+      return false;
+    };
+
+    // If offline, load offline session immediately and do not listen to Firebase Auth
+    if (!isOnline) {
+      const loaded = loadSessionOffline();
+      if (!loaded) {
+        setUser(null);
+        setUserProfile(null);
+        setCategories(DEFAULT_CATEGORIES('guest'));
+        setProducts([]);
+        setPurchases([]);
+        setPurchaseItems({});
+        setLoading(false);
+      }
       return;
     }
 
+    // If online, subscribe to Firebase Auth state changes
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      cleanupActiveListeners();
+      
       if (firebaseUser) {
+        // Clear active custom offline session if it doesn't match the firebaseUser UID to prevent mixups
+        const activeSession = localStorage.getItem('feira_active_offline_session');
+        if (activeSession) {
+          try {
+            const parsed = JSON.parse(activeSession);
+            if (parsed.uid !== firebaseUser.uid) {
+              localStorage.removeItem('feira_active_offline_session');
+            }
+          } catch (_) {
+            localStorage.removeItem('feira_active_offline_session');
+          }
+        }
+
         setUser(firebaseUser);
         setLoading(true);
         const uid = firebaseUser.uid;
@@ -175,7 +230,6 @@ export function useShoppingData() {
             }
           },
           (error) => {
-            // If permissions or document issue, fallback gracefully
             console.warn('Profile onSnapshot error:', error);
           }
         );
@@ -184,11 +238,28 @@ export function useShoppingData() {
         const qCategories = query(collection(db, 'categories'), where('userId', '==', uid));
         const unsubCategories = onSnapshot(
           qCategories, 
-          (snapshot) => {
-            const cats: Category[] = [];
-            snapshot.forEach((doc) => cats.push({ id: doc.id, ...doc.data() } as Category));
-            setCategories(cats);
-            saveUserData('categories', cats, uid);
+          async (snapshot) => {
+            if (snapshot.empty) {
+              const defaultCats = DEFAULT_CATEGORIES(uid);
+              setCategories(defaultCats);
+              saveUserData('categories', defaultCats, uid);
+              try {
+                const batch = writeBatch(db);
+                defaultCats.forEach((cat) => {
+                  const catRef = doc(db, 'categories', cat.id);
+                  batch.set(catRef, cat);
+                });
+                await batch.commit();
+              } catch (err) {
+                console.warn("Auto-seeding default categories notice:", err);
+              }
+            } else {
+              const cats: Category[] = [];
+              snapshot.forEach((doc) => cats.push({ id: doc.id, ...doc.data() } as Category));
+              cats.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+              setCategories(cats);
+              saveUserData('categories', cats, uid);
+            }
           },
           (error) => {
             handleFirestoreError(error, OperationType.GET, 'categories');
@@ -247,28 +318,36 @@ export function useShoppingData() {
           }
         );
 
-        setLoading(false);
-
-        return () => {
+        // Store active unsubscriptions in our mutable ref so we can clean them up anytime
+        listenersCleanupRef.current = () => {
           unsubProfile();
           unsubCategories();
           unsubProducts();
           unsubPurchases();
           Object.values(itemUnsubs).forEach(unsub => unsub());
         };
-      } else {
-        setUser(null);
-        setUserProfile(null);
-        setCategories([]);
-        setProducts([]);
-        setPurchases([]);
-        setPurchaseItems({});
+
         setLoading(false);
+      } else {
+        // If there is no firebaseUser, try to fall back to the active offline custom session
+        const loaded = loadSessionOffline();
+        if (!loaded) {
+          setUser(null);
+          setUserProfile(null);
+          setCategories(DEFAULT_CATEGORIES('guest'));
+          setProducts([]);
+          setPurchases([]);
+          setPurchaseItems({});
+          setLoading(false);
+        }
       }
     });
 
-    return () => unsubscribeAuth();
-  }, [isOnline]);
+    return () => {
+      unsubscribeAuth();
+      cleanupActiveListeners();
+    };
+  }, [isOnline, cleanupActiveListeners]);
 
   // --- Auth & Account Core Business Logic ---
 
@@ -319,6 +398,8 @@ export function useShoppingData() {
 
   // Setup real-time listeners for authenticated or local session user
   const setupUserDataListeners = (uid: string, fallbackDisplayName?: string, fallbackEmail?: string) => {
+    cleanupActiveListeners();
+    
     // 0. Profile listener
     const userDocRef = doc(db, 'users', uid);
     const unsubProfile = onSnapshot(
@@ -349,15 +430,29 @@ export function useShoppingData() {
     const qCategories = query(collection(db, 'categories'), where('userId', '==', uid));
     const unsubCategories = onSnapshot(
       qCategories,
-      (snapshot) => {
-        const cats: Category[] = [];
-        snapshot.forEach((d) => cats.push({ id: d.id, ...d.data() } as Category));
-        cats.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
-        setCategories(cats);
-        saveUserData('categories', cats, uid);
+      async (snapshot) => {
+        if (snapshot.empty) {
+          const defaultCats = DEFAULT_CATEGORIES(uid);
+          setCategories(defaultCats);
+          saveUserData('categories', defaultCats, uid);
+          try {
+            const batch = writeBatch(db);
+            defaultCats.forEach((cat) => {
+              const catRef = doc(db, 'categories', cat.id);
+              batch.set(catRef, cat);
+            });
+            await batch.commit();
+          } catch (_) {}
+        } else {
+          const cats: Category[] = [];
+          snapshot.forEach((d) => cats.push({ id: d.id, ...d.data() } as Category));
+          cats.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+          setCategories(cats);
+          saveUserData('categories', cats, uid);
+        }
       },
       () => {
-        const local = loadUserData('categories', [], uid);
+        const local = loadUserData('categories', DEFAULT_CATEGORIES(uid), uid);
         local.sort((a: Category, b: Category) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
         setCategories(local);
       }
@@ -396,12 +491,14 @@ export function useShoppingData() {
       }
     );
 
-    return () => {
+    listenersCleanupRef.current = () => {
       unsubProfile();
       unsubCategories();
       unsubProducts();
       unsubPurchases();
     };
+
+    return listenersCleanupRef.current;
   };
 
   // Register user account: Local Database first, then sync to Firebase, keeping user directly logged in
@@ -461,107 +558,110 @@ export function useShoppingData() {
       }
     }
 
-    let uid = `user_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const nowIso = new Date().toISOString();
 
-    // 2. GUARANTEE OFFLINE-FIRST: Save New Account Locally FIRST
-    let newProfile: UserProfile = {
-      id: uid,
-      name: cleanedName,
-      email: cleanedEmail,
-      cpf: cleanCpfDigits || undefined,
-      passwordHash: password,
-      color: '#0284c7',
-      createdAt: nowIso,
-      updatedAt: nowIso
-    };
-
-    const updatedLocalUsers = [...existingLocal, newProfile];
-    saveLocalUsers(updatedLocalUsers);
-
-    // Save default categories locally for this user
-    const defaultCats = DEFAULT_CATEGORIES(uid);
-    saveUserData('categories', defaultCats, uid);
-    saveUserData('user_profile', newProfile, uid);
-
-    // Set local state active immediately so the user is logged in
-    const activeOfflineUser: OfflineUser = {
-      uid,
-      email: cleanedEmail,
-      displayName: cleanedName,
-      isOffline: !isOnline
-    };
-    setUser(activeOfflineUser);
-    setUserProfile(newProfile);
-    setCategories(defaultCats);
-    setThemeColor('#0284c7');
-    localStorage.setItem('feira_active_offline_session', JSON.stringify(activeOfflineUser));
-    localStorage.setItem('feira_offline_session', JSON.stringify({
-      email: cleanedEmail,
-      uid,
-      displayName: cleanedName,
-      canUseOffline: true
-    }));
-
-    // 3. Send to Firebase (Auth & Firestore) in background with timeout protection
-    try {
-      const firebasePromise = (async () => {
-        try {
-          const userCredential = await createUserWithEmailAndPassword(auth, cleanedEmail, password);
-          const finalUid = userCredential.user.uid;
-          await updateProfile(userCredential.user, { displayName: cleanedName });
-          
-          const finalProfile: UserProfile = { ...newProfile, id: finalUid };
-          
-          await setDoc(doc(db, 'users', finalUid), finalProfile, { merge: true });
-          
-          // Seed default categories in Firestore
-          const batch = writeBatch(db);
-          DEFAULT_CATEGORIES(finalUid).forEach((cat) => {
-            const catRef = doc(collection(db, 'categories'));
-            batch.set(catRef, {
-              ...cat,
-              id: catRef.id,
-              userId: finalUid,
-              createdAt: nowIso,
-              updatedAt: nowIso
-            });
-          });
-          await batch.commit();
-
-          // Update local record with Firebase UID
-          const localUpdated = getLocalUsers().map(u => u.email === cleanedEmail ? finalProfile : u);
-          saveLocalUsers(localUpdated);
-          saveUserData('categories', DEFAULT_CATEGORIES(finalUid), finalUid);
-          saveUserData('user_profile', finalProfile, finalUid);
-
-          // Update active user state to Firebase authenticated user
-          setUser(userCredential.user);
-          setUserProfile(finalProfile);
-          setupUserDataListeners(finalUid, cleanedName, cleanedEmail);
-        } catch (err: any) {
-          if (err.code === 'auth/email-already-in-use') {
-            throw new Error("Este endereço de e-mail já está cadastrado.");
-          }
-          console.warn("Firebase background registration notice:", err.message || err);
-          try {
-            await setDoc(doc(db, 'users', uid), newProfile, { merge: true });
-          } catch (_) {}
+    // 2. Online Registration
+    if (isOnline) {
+      try {
+        const userCredential = await createUserWithEmailAndPassword(auth, cleanedEmail, password);
+        const finalUid = userCredential.user.uid;
+        await updateProfile(userCredential.user, { displayName: cleanedName });
+        
+        const finalProfile: UserProfile = {
+          id: finalUid,
+          name: cleanedName,
+          email: cleanedEmail,
+          color: '#0284c7',
+          passwordHash: password,
+          createdAt: nowIso,
+          updatedAt: nowIso
+        };
+        if (cleanCpfDigits) {
+          finalProfile.cpf = cleanCpfDigits;
         }
-      })();
+        
+        await setDoc(doc(db, 'users', finalUid), finalProfile, { merge: true });
+        
+        // Seed the 9 default categories in Firestore with matching deterministic IDs
+        const defaultCats = DEFAULT_CATEGORIES(finalUid);
+        const batch = writeBatch(db);
+        defaultCats.forEach((cat) => {
+          const catRef = doc(db, 'categories', cat.id);
+          batch.set(catRef, {
+            ...cat,
+            id: cat.id,
+            userId: finalUid,
+            createdAt: nowIso,
+            updatedAt: nowIso
+          });
+        });
+        await batch.commit();
 
-      // Fast timeout safeguard (3 seconds)
-      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 3000));
-      await Promise.race([firebasePromise, timeoutPromise]);
-    } catch (e: any) {
-      if (e.message && e.message.includes('já está cadastrado')) {
-        const cleaned = getLocalUsers().filter(u => u.email !== cleanedEmail);
-        saveLocalUsers(cleaned);
-        setUser(null);
-        setUserProfile(null);
-        throw e;
+        // Save local record with Firebase UID
+        const localUpdated = [...existingLocal.filter(u => u.email !== cleanedEmail), finalProfile];
+        saveLocalUsers(localUpdated);
+        saveUserData('categories', defaultCats, finalUid);
+        saveUserData('user_profile', finalProfile, finalUid);
+
+        localStorage.setItem('feira_offline_session', JSON.stringify({
+          email: cleanedEmail,
+          uid: finalUid,
+          displayName: cleanedName,
+          canUseOffline: true
+        }));
+
+        // Update active user state
+        setUser(userCredential.user);
+        setUserProfile(finalProfile);
+        setCategories(defaultCats);
+        setThemeColor('#0284c7');
+        setupUserDataListeners(finalUid, cleanedName, cleanedEmail);
+      } catch (err: any) {
+        if (err.code === 'auth/email-already-in-use') {
+          throw new Error("Este endereço de e-mail já está cadastrado.");
+        }
+        console.error("Erro ao registrar no Firebase Auth/Firestore:", err);
+        throw new Error(err.message || "Erro ao conectar com o servidor para criar sua conta.");
       }
-      console.warn("Firebase registration synced or proceeding offline:", e);
+    } else {
+      // Offline-Only Registration
+      let uid = `user_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      let newProfile: UserProfile = {
+        id: uid,
+        name: cleanedName,
+        email: cleanedEmail,
+        color: '#0284c7',
+        passwordHash: password,
+        createdAt: nowIso,
+        updatedAt: nowIso
+      };
+      if (cleanCpfDigits) {
+        newProfile.cpf = cleanCpfDigits;
+      }
+
+      const defaultCats = DEFAULT_CATEGORIES(uid);
+      const updatedLocalUsers = [...existingLocal, newProfile];
+      saveLocalUsers(updatedLocalUsers);
+      saveUserData('categories', defaultCats, uid);
+      saveUserData('user_profile', newProfile, uid);
+
+      const activeOfflineUser: OfflineUser = {
+        uid,
+        email: cleanedEmail,
+        displayName: cleanedName,
+        isOffline: true
+      };
+      setUser(activeOfflineUser);
+      setUserProfile(newProfile);
+      setCategories(defaultCats);
+      setThemeColor('#0284c7');
+      localStorage.setItem('feira_active_offline_session', JSON.stringify(activeOfflineUser));
+      localStorage.setItem('feira_offline_session', JSON.stringify({
+        email: cleanedEmail,
+        uid,
+        displayName: cleanedName,
+        canUseOffline: true
+      }));
     }
   };
 
@@ -829,6 +929,7 @@ export function useShoppingData() {
   const logout = async () => {
     setIsSyncing(true);
     try {
+      cleanupActiveListeners();
       localStorage.removeItem('feira_offline_session');
       localStorage.removeItem('feira_active_offline_session');
 
@@ -1035,7 +1136,8 @@ export function useShoppingData() {
   const changeUserPassword = async (
     currentPassword: string,
     newPassword: string,
-    confirmPassword: string
+    confirmPassword: string,
+    isGoogleUser: boolean = false
   ): Promise<void> => {
     const currentUid = user ? user.uid : (userProfile ? userProfile.id : null);
     if (!currentUid) {
@@ -1054,18 +1156,10 @@ export function useShoppingData() {
       throw new Error("A nova senha precisa ser diferente da senha atual.");
     }
 
-    // Check current password against local user or userProfile
-    const localUsers = getLocalUsers();
-    const localMatch = localUsers.find(u => u.id === currentUid || (userProfile?.email && u.email.toLowerCase() === userProfile.email.toLowerCase()));
-    if (localMatch && localMatch.passwordHash) {
-      if (currentPassword && localMatch.passwordHash !== currentPassword) {
-        throw new Error("A senha atual informada está incorreta.");
-      }
-    }
-
     const updatedAt = new Date().toISOString();
 
     // 2. Update local storage immediately
+    const localUsers = getLocalUsers();
     const updatedUsers = localUsers.map(u => {
       if (u.id === currentUid || (userProfile?.email && u.email.toLowerCase() === userProfile.email.toLowerCase())) {
         return { ...u, passwordHash: newPassword, updatedAt };
@@ -1080,11 +1174,11 @@ export function useShoppingData() {
       saveUserData('user_profile', updatedProfile, currentUid);
     }
 
-    // 3. Re-authenticate and update Firebase Auth if online and auth user exists
+    // 3. Re-authenticate (if currentPassword provided) and update Firebase Auth if online and auth user exists
     const firebaseUser = auth.currentUser;
     if (firebaseUser && firebaseUser.email && isOnline) {
       try {
-        if (currentPassword) {
+        if (currentPassword && !isGoogleUser) {
           try {
             const credential = EmailAuthProvider.credential(firebaseUser.email, currentPassword);
             await reauthenticateWithCredential(firebaseUser, credential);
@@ -1140,6 +1234,7 @@ export function useShoppingData() {
         await batch.commit();
       } catch (error) {
         console.error("Erro ao semear dados no Firestore:", error);
+        throw error;
       } finally {
         setIsSyncing(false);
       }
@@ -1199,39 +1294,47 @@ export function useShoppingData() {
 
   // Clear All Data
   const clearAllData = async () => {
-    if (user && !('isOffline' in user)) {
-      setIsSyncing(true);
-      try {
-        const catSnap = await getDocs(query(collection(db, 'categories'), where('userId', '==', user.uid)));
-        const prodSnap = await getDocs(query(collection(db, 'products'), where('userId', '==', user.uid)));
-        const purSnap = await getDocs(query(collection(db, 'purchases'), where('userId', '==', user.uid)));
+    const currentUid = user ? user.uid : (userProfile ? userProfile.id : null);
+    if (!currentUid) return;
+
+    setIsSyncing(true);
+    try {
+      // 1. Clear local state and local storage immediately (Local-first)
+      setCategories([]);
+      setProducts([]);
+      setPurchases([]);
+      setPurchaseItems({});
+      localStorage.removeItem(`feira_user_${currentUid}_categories`);
+      localStorage.removeItem(`feira_user_${currentUid}_products`);
+      localStorage.removeItem(`feira_user_${currentUid}_purchases`);
+      localStorage.removeItem(`feira_user_${currentUid}_purchase_items`);
+
+      // 2. If online and real Firebase account, delete Firestore collections
+      if (user && !('isOffline' in user) && isOnline) {
+        const catSnap = await getDocs(query(collection(db, 'categories'), where('userId', '==', currentUid)));
+        const prodSnap = await getDocs(query(collection(db, 'products'), where('userId', '==', currentUid)));
+        const purSnap = await getDocs(query(collection(db, 'purchases'), where('userId', '==', currentUid)));
 
         const batch = writeBatch(db);
         catSnap.forEach(d => batch.delete(d.ref));
         prodSnap.forEach(d => batch.delete(d.ref));
         
         for (const pDoc of purSnap.docs) {
-          const itemsSnap = await getDocs(collection(db, 'purchases', pDoc.id, 'items'));
-          itemsSnap.forEach(iDoc => batch.delete(iDoc.ref));
+          try {
+            const itemsSnap = await getDocs(collection(db, 'purchases', pDoc.id, 'items'));
+            itemsSnap.forEach(iDoc => batch.delete(iDoc.ref));
+          } catch (itemErr) {
+            console.warn("Error deleting subcollection items for", pDoc.id, itemErr);
+          }
           batch.delete(pDoc.ref);
         }
 
         await batch.commit();
-      } catch (error) {
-        console.error("Erro ao deletar dados do Firestore:", error);
-      } finally {
-        setIsSyncing(false);
       }
-    } else if (user) {
-      // Offline mode reset
-      setCategories([]);
-      setProducts([]);
-      setPurchases([]);
-      setPurchaseItems({});
-      localStorage.removeItem(`feira_user_${user.uid}_categories`);
-      localStorage.removeItem(`feira_user_${user.uid}_products`);
-      localStorage.removeItem(`feira_user_${user.uid}_purchases`);
-      localStorage.removeItem(`feira_user_${user.uid}_purchase_items`);
+    } catch (error) {
+      console.error("Erro ao deletar dados:", error);
+    } finally {
+      setIsSyncing(false);
     }
   };
 

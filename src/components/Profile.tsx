@@ -19,7 +19,7 @@ interface ProfileProps {
     color?: string;
     cpf?: string;
   }) => Promise<void>;
-  changeUserPassword: (currentPassword: string, newPassword: string, confirmPassword: string) => Promise<void>;
+  changeUserPassword: (currentPassword: string, newPassword: string, confirmPassword: string, isGoogleUser?: boolean) => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
   logout: () => Promise<void>;
@@ -145,6 +145,17 @@ export function Profile({
       if (securityTimerRef.current) clearTimeout(securityTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (userProfile) {
+      setName(userProfile.name || user.displayName || '');
+      setCpf(userProfile.cpf ? formatCPF(userProfile.cpf) : '');
+      setPhone(userProfile.phone || '');
+      setBio(userProfile.bio || '');
+      setColor(userProfile.color || '#0284c7');
+      setPhotoURL(userProfile.photoURL || ('photoURL' in user ? user.photoURL : null) || null);
+    }
+  }, [userProfile, user]);
 
   const [copiedUid, setCopiedUid] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
@@ -314,10 +325,6 @@ export function Profile({
 
   const handleSavePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentPassword) {
-      showPasswordErrorTimed('Informe sua senha atual.');
-      return;
-    }
     if (!newPassword || newPassword.length < 6) {
       showPasswordErrorTimed('A nova senha deve possuir no mínimo 6 caracteres.');
       return;
@@ -330,7 +337,7 @@ export function Profile({
     setSavingPassword(true);
 
     try {
-      await changeUserPassword(currentPassword, newPassword, confirmPassword);
+      await changeUserPassword('', newPassword, confirmPassword, isGoogleUser);
       showPasswordSuccessTimed('Senha alterada com sucesso!');
       setCurrentPassword('');
       setNewPassword('');
@@ -654,14 +661,16 @@ export function Profile({
                         <ShieldCheck size={12} /> Verificado
                       </span>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={handleSendVerification}
-                        disabled={sendingVerify || !isOnline}
-                        className="text-[10px] font-bold text-amber-600 hover:underline flex items-center gap-0.5"
-                      >
-                        {sendingVerify ? 'Enviando...' : 'Verificar E-mail'}
-                      </button>
+                      isGoogleUser && (
+                        <button
+                          type="button"
+                          onClick={handleSendVerification}
+                          disabled={sendingVerify || !isOnline}
+                          className="text-[10px] font-bold text-amber-600 hover:underline flex items-center gap-0.5"
+                        >
+                          {sendingVerify ? 'Enviando...' : 'Verificar E-mail'}
+                        </button>
+                      )
                     )}
                   </div>
                   <div className="relative">
@@ -796,194 +805,125 @@ export function Profile({
               <span className="text-[10px] text-neutral-400 font-bold uppercase">Acesso</span>
             </div>
 
-            {isGoogleUser ? (
-              <div className="p-4 bg-sky-50/70 border border-sky-200 rounded-2xl space-y-2 text-xs text-sky-900">
-                <span className="font-extrabold flex items-center gap-1.5">
-                  <ShieldCheck size={15} className="text-sky-600" />
-                  Autenticação Google Ativa
-                </span>
-                <p className="text-[11px] text-sky-800 leading-relaxed">
-                  Sua conta está conectada através do Google. Sua segurança e senha são protegidas diretamente pela sua conta Google.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {passwordError && (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-2xl text-xs font-bold text-red-700 flex items-start gap-1.5">
-                    <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                    <span>{passwordError}</span>
+            <div className="space-y-4">
+              {isGoogleUser && (
+                <div className="p-4 bg-sky-50/70 border border-sky-200 rounded-2xl space-y-2 text-xs text-sky-900">
+                  <span className="font-extrabold flex items-center gap-1.5">
+                    <ShieldCheck size={15} className="text-sky-600" />
+                    Autenticação Google Ativa
+                  </span>
+                  <p className="text-[11px] text-sky-800 leading-relaxed text-justify">
+                    Sua conta está conectada através do Google. Sua segurança e senha são protegidas diretamente pela sua conta Google. Você pode definir uma nova senha abaixo para habilitar o login por e-mail/senha.
+                  </p>
+                </div>
+              )}
+
+              {passwordError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-2xl text-xs font-bold text-red-700 flex items-start gap-1.5">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <span>{passwordError}</span>
+                </div>
+              )}
+
+              {passwordSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs font-bold text-emerald-800 flex items-start gap-1.5">
+                  <Check size={14} className="shrink-0 mt-0.5" />
+                  <span>{passwordSuccess}</span>
+                </div>
+              )}
+
+              {securityNotice && (
+                <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl text-xs font-bold text-indigo-800 flex items-start gap-1.5">
+                  <Sparkles size={14} className="shrink-0 mt-0.5" />
+                  <span>{securityNotice}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSavePassword} className="space-y-3">
+                {/* New password */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-neutral-700">
+                    {isGoogleUser ? 'Definir Nova Senha (Mín. 6 caracteres)' : 'Nova Senha (Mín. 6 caracteres)'}
+                  </label>
+                  <div className="relative">
+                    <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      required
+                      placeholder="Mínimo 6 caracteres"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full pl-9 pr-8 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-neutral-900 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
+                    >
+                      {showNewPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
                   </div>
-                )}
 
-                {passwordSuccess && (
-                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs font-bold text-emerald-800 flex items-start gap-1.5">
-                    <Check size={14} className="shrink-0 mt-0.5" />
-                    <span>{passwordSuccess}</span>
-                  </div>
-                )}
-
-                {securityNotice && (
-                  <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl text-xs font-bold text-indigo-800 flex items-start gap-1.5">
-                    <Sparkles size={14} className="shrink-0 mt-0.5" />
-                    <span>{securityNotice}</span>
-                  </div>
-                )}
-
-                <form onSubmit={handleSavePassword} className="space-y-3">
-                  {/* Current password */}
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-700">Senha Atual</label>
-                    <div className="relative">
-                      <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                      <input
-                        type={showCurrentPassword ? 'text' : 'password'}
-                        required
-                        placeholder="Digite sua senha atual"
-                        value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
-                        className="w-full pl-9 pr-8 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-neutral-900 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
-                      >
-                        {showCurrentPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* New password */}
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-700">Nova Senha (Mín. 6 caracteres)</label>
-                    <div className="relative">
-                      <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                      <input
-                        type={showNewPassword ? 'text' : 'password'}
-                        required
-                        placeholder="Mínimo 6 caracteres"
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        className="w-full pl-9 pr-8 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-neutral-900 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowNewPassword(!showNewPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
-                      >
-                        {showNewPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                      </button>
-                    </div>
-
-                    {/* Password Strength Indicator */}
-                    {newPassword && (
-                      <div className="space-y-1 pt-1">
-                        <div className="flex justify-between text-[10px] font-bold">
-                          <span className="text-neutral-400">Força da senha:</span>
-                          <span className={passStrength.score === 1 ? 'text-red-500' : passStrength.score === 2 ? 'text-amber-500' : 'text-emerald-600'}>
-                            {passStrength.text}
-                          </span>
-                        </div>
-                        <div className="h-1 w-full bg-neutral-100 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full ${passStrength.color} transition-all duration-300`}
-                            style={{ width: `${(passStrength.score / 3) * 100}%` }}
-                          />
-                        </div>
+                  {/* Password Strength Indicator */}
+                  {newPassword && (
+                    <div className="space-y-1 pt-1">
+                      <div className="flex justify-between text-[10px] font-bold">
+                        <span className="text-neutral-400">Força da senha:</span>
+                        <span className={passStrength.score === 1 ? 'text-red-500' : passStrength.score === 2 ? 'text-amber-500' : 'text-emerald-600'}>
+                          {passStrength.text}
+                        </span>
                       </div>
-                    )}
-                  </div>
-
-                  {/* Confirm new password */}
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-700">Confirmar Nova Senha</label>
-                    <div className="relative">
-                      <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                      <input
-                        type={showConfirmPassword ? 'text' : 'password'}
-                        required
-                        placeholder="Repita a nova senha"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        className="w-full pl-9 pr-8 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-neutral-900 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
-                      >
-                        {showConfirmPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                      </button>
+                      <div className="h-1 w-full bg-neutral-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${passStrength.color} transition-all duration-300`}
+                          style={{ width: `${(passStrength.score / 3) * 100}%` }}
+                        />
+                      </div>
                     </div>
+                  )}
+                </div>
+
+                {/* Confirm new password */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-neutral-700">Confirmar Nova Senha</label>
+                  <div className="relative">
+                    <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      required
+                      placeholder="Repita a nova senha"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full pl-9 pr-8 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-neutral-900 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
+                    >
+                      {showConfirmPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
                   </div>
+                </div>
 
-                  <button
-                    type="submit"
-                    disabled={savingPassword}
-                    className="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold shadow-sm transition-all active:scale-95 flex items-center justify-center gap-2 mt-2"
-                  >
-                    {savingPassword ? (
-                      <>
-                        <RefreshCw size={13} className="animate-spin" />
-                        Atualizando Senha...
-                      </>
-                    ) : (
-                      <>
-                        <Key size={13} />
-                        Alterar Senha de Acesso
-                      </>
-                    )}
-                  </button>
-                </form>
-              </div>
-            )}
-          </div>
-
-          {/* Card: Account Summary Stats */}
-          <div className="bg-white rounded-3xl border border-neutral-200/90 shadow-sm p-6 space-y-4">
-            <h2 className="font-extrabold text-sm text-neutral-900 flex items-center gap-2 pb-2 border-b border-neutral-100">
-              <Layers size={16} className="text-neutral-500" />
-              Resumo da Conta
-            </h2>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-100">
-                <span className="text-[10px] text-neutral-400 font-bold uppercase block">Listas Criadas</span>
-                <span className="text-lg font-black text-neutral-900">{purchases.length}</span>
-              </div>
-
-              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-100">
-                <span className="text-[10px] text-neutral-400 font-bold uppercase block">Produtos Salvos</span>
-                <span className="text-lg font-black text-neutral-900">{products.length}</span>
-              </div>
-
-              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-100">
-                <span className="text-[10px] text-neutral-400 font-bold uppercase block">Categorias</span>
-                <span className="text-lg font-black text-neutral-900">{categories.length}</span>
-              </div>
-
-              <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
-                <span className="text-[10px] text-emerald-700 font-bold uppercase block">Total Gasto</span>
-                <span className="text-sm font-black text-emerald-800">
-                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalSpentAll)}
-                </span>
-              </div>
-            </div>
-
-            {/* Account ID / UID */}
-            <div className="pt-2 border-t border-neutral-100">
-              <span className="text-[10px] text-neutral-400 font-bold block mb-1">Identificador da Conta (ID):</span>
-              <div className="flex items-center justify-between bg-neutral-50 p-2 rounded-xl border border-neutral-200 text-[11px] font-mono text-neutral-600">
-                <span className="truncate max-w-[200px]">{user.uid}</span>
                 <button
-                  type="button"
-                  onClick={handleCopyUid}
-                  className="p-1 hover:bg-neutral-200 rounded transition-colors text-neutral-500"
-                  title="Copiar ID da Conta"
+                  type="submit"
+                  disabled={savingPassword}
+                  className="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold shadow-sm transition-all active:scale-95 flex items-center justify-center gap-2 mt-2"
                 >
-                  {copiedUid ? <CheckCheck size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                  {savingPassword ? (
+                    <>
+                      <RefreshCw size={13} className="animate-spin" />
+                      {isGoogleUser ? 'Definindo Senha...' : 'Atualizando Senha...'}
+                    </>
+                  ) : (
+                    <>
+                      <Key size={13} />
+                      {isGoogleUser ? 'Definir Senha de Acesso' : 'Alterar Senha de Acesso'}
+                    </>
+                  )}
                 </button>
-              </div>
+              </form>
             </div>
           </div>
         </div>

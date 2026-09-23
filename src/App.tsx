@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Home as HomeIcon, ShoppingBasket, ShoppingBag, BarChart3, Sliders, Menu, X, RefreshCw, AlertCircle, User as UserIcon
+  Home as HomeIcon, ShoppingBasket, ShoppingBag, BarChart3, Sliders, Menu, X, RefreshCw, AlertCircle, User as UserIcon, LogOut
 } from 'lucide-react';
 import { useShoppingData } from './useShoppingData';
 import { AppLogo } from './components/AppLogo';
@@ -19,7 +19,7 @@ export default function App() {
   const data = useShoppingData();
   const [activeTab, setActiveTab] = useState<string>('home');
   const [selectedPurchaseId, setSelectedPurchaseId] = useState<string | null>(null);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sideMenuOpen, setSideMenuOpen] = useState(false);
 
   // Sync primary theme color to CSS variable
   useEffect(() => {
@@ -51,7 +51,7 @@ export default function App() {
     } else {
       setSelectedPurchaseId(null);
     }
-    setMobileMenuOpen(false);
+    setSideMenuOpen(false);
   };
 
   const navItems = [
@@ -59,6 +59,7 @@ export default function App() {
     { id: 'products', label: 'Produtos', icon: ShoppingBasket },
     { id: 'purchases', label: 'Minhas Compras', icon: ShoppingBag },
     { id: 'reports', label: 'Análise de Gastos', icon: BarChart3 },
+    { id: 'profile', label: 'Meu Perfil', icon: UserIcon },
     { id: 'settings', label: 'Ajustes', icon: Sliders },
   ];
 
@@ -94,35 +95,23 @@ export default function App() {
       {/* Top navbar */}
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-neutral-200/80">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div 
-            onClick={() => handleNavigate('home')} 
-            className="cursor-pointer select-none"
-          >
-            <AppLogo size={36} showText={true} />
-          </div>
+          <div className="flex items-center gap-3">
+            {/* Hamburger Side Menu Trigger Button */}
+            <button
+              onClick={() => setSideMenuOpen(true)}
+              className="p-2 -ml-2 hover:bg-neutral-100 rounded-xl text-neutral-700 transition-all active:scale-95 flex items-center justify-center"
+              aria-label="Abrir menu lateral"
+            >
+              <Menu size={22} />
+            </button>
 
-          {/* Desktop Nav links */}
-          <nav className="hidden md:flex gap-1">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => handleNavigate(item.id)}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 ${
-                    isActive
-                      ? 'bg-sky-500 text-white shadow-sm shadow-sky-500/15'
-                      : 'text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100/80'
-                  }`}
-                  style={isActive ? { backgroundColor: data.themeColor } : undefined}
-                >
-                  <Icon size={15} />
-                  {item.label}
-                </button>
-              );
-            })}
-          </nav>
+            <div 
+              onClick={() => handleNavigate('home')} 
+              className="cursor-pointer select-none flex items-center"
+            >
+              <AppLogo size={36} showText={true} />
+            </div>
+          </div>
 
           {/* Right section info: Online badge, PWA button and Avatar shortcut */}
           <div className="flex items-center gap-2 text-xs font-bold text-neutral-500">
@@ -142,15 +131,11 @@ export default function App() {
               )}
             </div>
 
-            {/* Quick Profile Avatar Shortcut */}
+            {/* Quick Profile Avatar Shortcut (direct navigation to profile) */}
             <button
               onClick={() => handleNavigate('profile')}
-              className={`flex items-center gap-2 p-1 pl-1.5 pr-2.5 rounded-2xl border transition-all active:scale-95 ${
-                activeTab === 'profile'
-                  ? 'bg-sky-50 border-sky-300 text-sky-700 shadow-xs'
-                  : 'bg-white hover:bg-neutral-50 border-neutral-200 text-neutral-700 shadow-xs'
-              }`}
-              title="Ir para Meu Perfil"
+              className="flex items-center gap-2 p-1 pl-1.5 pr-2.5 rounded-2xl border transition-all active:scale-95 bg-white hover:bg-neutral-50 border-neutral-200 text-neutral-700 shadow-xs"
+              title="Ir para o Meu Perfil"
             >
               <div className="h-7 w-7 rounded-xl bg-sky-500 text-white flex items-center justify-center font-bold text-xs overflow-hidden shadow-xs">
                 {userAvatarUrl ? (
@@ -163,43 +148,98 @@ export default function App() {
                 {userDisplayName}
               </span>
             </button>
-
-            {/* Mobile Menu Toggle */}
-            <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 md:hidden hover:bg-neutral-100 rounded-xl text-neutral-600 transition-colors"
-              aria-label="Abrir menu"
-            >
-              {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
-            </button>
           </div>
         </div>
       </header>
 
-      {/* Mobile Drawer menu */}
-      {mobileMenuOpen && (
-        <div className="md:hidden sticky top-16 z-30 bg-white border-b border-neutral-200 px-4 py-3 space-y-1 shadow-md">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => handleNavigate(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
-                  isActive
-                    ? 'bg-sky-500 text-white shadow-sm'
-                    : 'text-neutral-600 hover:bg-neutral-50'
-                }`}
-                style={isActive ? { backgroundColor: data.themeColor } : undefined}
-              >
-                <Icon size={16} />
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* Side-overlay Menu Drawer */}
+      <div 
+        className={`fixed inset-0 z-50 pointer-events-none transition-all duration-300 ${
+          sideMenuOpen ? 'visible' : 'invisible'
+        }`}
+      >
+        {/* Backdrop overlay */}
+        <div 
+          onClick={() => setSideMenuOpen(false)}
+          className={`absolute inset-0 bg-black/50 backdrop-blur-xs transition-opacity duration-300 pointer-events-auto ${
+            sideMenuOpen ? 'opacity-100' : 'opacity-0'
+          }`}
+        />
+
+        {/* Sliding menu panel */}
+        <aside 
+          className={`absolute inset-y-0 left-0 w-80 max-w-[85vw] bg-white shadow-2xl flex flex-col transition-transform duration-300 pointer-events-auto ease-out transform ${
+            sideMenuOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
+        >
+          {/* Menu Drawer Header */}
+          <div className="p-5 border-b border-neutral-150 flex items-center justify-between bg-neutral-50">
+            <AppLogo size={30} showText={true} />
+            <button
+              onClick={() => setSideMenuOpen(false)}
+              className="p-1.5 hover:bg-neutral-200 rounded-xl text-neutral-500 transition-colors"
+              aria-label="Fechar menu"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* User Profile Summary Card */}
+          <div className="p-5 border-b border-neutral-100 flex items-center gap-3.5 bg-sky-50/30">
+            <div 
+              className="h-12 w-12 rounded-2xl bg-sky-500 text-white flex items-center justify-center font-black text-lg overflow-hidden border-2 shadow-xs"
+              style={{ borderColor: data.themeColor }}
+            >
+              {userAvatarUrl ? (
+                <img src={userAvatarUrl} alt="Foto de Perfil" className="h-full w-full object-cover" />
+              ) : (
+                userDisplayName.charAt(0).toUpperCase()
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="text-sm font-black text-neutral-900 truncate">{userDisplayName}</h4>
+              <p className="text-[11px] text-neutral-400 truncate font-medium">{data.user.email || 'Usuário Autenticado'}</p>
+            </div>
+          </div>
+
+          {/* Navigation Links List */}
+          <nav className="flex-1 overflow-y-auto p-4 space-y-1.5">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleNavigate(item.id)}
+                  className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-xs font-bold transition-all active:scale-98 ${
+                    isActive
+                      ? 'text-white shadow-md'
+                      : 'text-neutral-600 hover:text-neutral-950 hover:bg-neutral-50'
+                  }`}
+                  style={isActive ? { backgroundColor: data.themeColor } : undefined}
+                >
+                  <Icon size={16} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Menu Bottom: Logout button */}
+          <div className="p-4 border-t border-neutral-100 bg-neutral-50/50">
+            <button
+              onClick={() => {
+                setSideMenuOpen(false);
+                data.logout();
+              }}
+              className="w-full flex items-center justify-center gap-2 py-3 bg-red-50 hover:bg-red-100/80 active:bg-red-100 border border-red-200 text-red-700 rounded-2xl text-xs font-extrabold shadow-sm transition-all active:scale-95"
+            >
+              <LogOut size={15} />
+              <span>Sair da Conta</span>
+            </button>
+          </div>
+        </aside>
+      </div>
 
       {/* Main content body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-5 sm:py-8 pb-32 md:pb-20">
@@ -305,7 +345,7 @@ export default function App() {
       {/* Mobile Fixed Bottom Navigation Bar */}
       <footer className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-neutral-200/90 py-1.5 shadow-[0_-4px_16px_rgba(0,0,0,0.08)] pb-safe">
         <div className="flex justify-around items-center max-w-lg mx-auto px-2">
-          {navItems.map((item) => {
+          {navItems.filter(item => item.id !== 'profile').map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (

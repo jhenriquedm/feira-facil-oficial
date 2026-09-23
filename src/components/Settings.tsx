@@ -33,6 +33,25 @@ interface SettingsProps {
   onNavigate?: (tab: string) => void;
 }
 
+function formatReleaseDate(dateStr: string): string {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  const year = parts[0];
+  const monthNum = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  
+  const months = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
+  
+  if (monthNum >= 1 && monthNum <= 12) {
+    return `${day} de ${months[monthNum - 1]} de ${year}`;
+  }
+  return dateStr;
+}
+
 export function Settings({
   user,
   userProfile,
@@ -224,7 +243,7 @@ export function Settings({
           <HardDrive size={16} className="text-sky-500" />
           Segurança, Backup & Exportação de Dados
         </h3>
-        <p className="text-xs text-neutral-500 leading-relaxed">
+        <p className="text-xs text-neutral-500 leading-relaxed text-justify">
           Mantenha uma cópia de segurança completa de todas as suas categorias, produtos cadastrados com código de barras, preços e listas de compras.
         </p>
 
@@ -365,7 +384,7 @@ export function Settings({
           <Play size={16} className="text-sky-500" />
           Dados de Demonstração (Seed)
         </h3>
-        <p className="text-xs text-neutral-500 leading-relaxed">
+        <p className="text-xs text-neutral-500 leading-relaxed text-justify">
           Carregue uma paleta completa de categorias e produtos pré-configurados de supermercado brasileiro (Hortifruti, Açougue, Laticínios, Mercearia, Limpeza) com unidades de medida e preços de referência para testar o sistema.
         </p>
 
@@ -413,41 +432,8 @@ export function Settings({
 
           <div className="p-3.5 bg-neutral-50/80 rounded-2xl border border-neutral-200">
             <span className="text-[10px] uppercase font-bold text-neutral-400 block">Última Atualização</span>
-            <span className="text-xs font-bold text-neutral-800 block">{APP_VERSION_INFO.releaseDate}</span>
+            <span className="text-xs font-bold text-neutral-800 block">{formatReleaseDate(APP_VERSION_INFO.releaseDate)}</span>
           </div>
-        </div>
-
-        {/* Changelog toggle */}
-        <div className="border-t border-neutral-100 pt-3">
-          <button
-            type="button"
-            onClick={() => setShowChangelog(!showChangelog)}
-            className="flex items-center justify-between w-full text-xs font-bold text-sky-600 hover:text-sky-700 py-1"
-          >
-            <span className="flex items-center gap-1.5">
-              <Sparkles size={14} />
-              Histórico de Atualizações & Notas de Versão
-            </span>
-            {showChangelog ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          </button>
-
-          {showChangelog && (
-            <div className="mt-3 space-y-4 text-xs">
-              {APP_VERSION_INFO.changelog.map((rel) => (
-                <div key={rel.version} className="p-4 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-black text-neutral-900">Versão {rel.version}</span>
-                    <span className="text-[11px] text-neutral-400">{rel.date}</span>
-                  </div>
-                  <ul className="space-y-1 text-neutral-600 list-disc pl-4">
-                    {rel.highlights.map((h, i) => (
-                      <li key={i} className="text-[11px] leading-relaxed">{h}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
@@ -457,7 +443,7 @@ export function Settings({
           <ShieldAlert size={16} />
           Zona de Perigo
         </h3>
-        <p className="text-xs text-red-700 leading-relaxed">
+        <p className="text-xs text-red-700 leading-relaxed text-justify">
           Exclua permanentemente todos os produtos, categorias e históricos de compras registradas. Se estiver conectado à sua conta na nuvem, isso apagará os registros do Firestore. Esta ação é irreversível!
         </p>
 

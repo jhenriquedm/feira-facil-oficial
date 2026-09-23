@@ -14,14 +14,24 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.3.0',
-  buildNumber: 13,
+  version: '1.3.1',
+  buildNumber: 14,
   releaseDate: '2026-09-23',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.mindflow.mercadofacil',
   changelog: [
+    {
+      version: '1.3.1',
+      date: '2026-09-23',
+      highlights: [
+        'Sincronização imediata de novos usuários no Firestore com banco de dados correto',
+        'Inclusão nativa das 9 categorias padrão na instalação e primeiro acesso do app',
+        'Remoção do Resumo da Conta na tela de perfil',
+        'Otimização do fluxo de registro eliminando redirecionamentos indevidos'
+      ]
+    },
     {
       version: '1.3.0',
       date: '2026-09-23',

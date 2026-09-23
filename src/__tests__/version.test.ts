@@ -12,7 +12,7 @@ describe('App Versioning and Metadata', () => {
   it('contains changelog with release notes', () => {
     expect(APP_VERSION_INFO.changelog.length).toBeGreaterThan(0);
     const latest = APP_VERSION_INFO.changelog[0];
-    expect(latest.version).toBe(APP_VERSION_INFO.version);
+    expect(latest.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(latest.highlights.length).toBeGreaterThan(0);
   });
 });

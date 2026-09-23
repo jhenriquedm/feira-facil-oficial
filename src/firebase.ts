@@ -13,7 +13,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app, "ai-studio-mindflowaiestdio-64cb53c1-43d8-4046-8b7b-600d8d800a18");
+export const db = getFirestore(app, "ai-studio-feiramensalgesto-64cb53c1-43d8-4046-8b7b-600d8d800a18");
 
 export enum OperationType {
   CREATE = 'create',
