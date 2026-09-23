@@ -28,6 +28,21 @@ export default function App() {
     }
   }, [data.themeColor]);
 
+  // Initialize native GoogleAuth on native platforms
+  useEffect(() => {
+    import('@capacitor/core').then(({ Capacitor }) => {
+      if (Capacitor.isNativePlatform()) {
+        import('@codetrix-studio/capacitor-google-auth').then(({ GoogleAuth }) => {
+          GoogleAuth.initialize({
+            clientId: '901690992750-jbuc5p2bebr2940uaorqtn5qcp72q6cp.apps.googleusercontent.com',
+            scopes: ['profile', 'email'],
+            grantOfflineAccess: false,
+          }).catch((e) => console.warn('Native GoogleAuth pre-init warn:', e));
+        });
+      }
+    }).catch((err) => console.warn('Capacitor detection warn:', err));
+  }, []);
+
   // Custom tab switching with purchaseId parameters
   const handleNavigate = (tab: string, purchaseId?: string) => {
     setActiveTab(tab);

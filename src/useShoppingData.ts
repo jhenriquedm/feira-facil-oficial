@@ -24,12 +24,15 @@ import {
   updatePassword,
   reauthenticateWithCredential,
   EmailAuthProvider,
-  sendEmailVerification
+  sendEmailVerification,
+  signInWithCredential
 } from 'firebase/auth';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { Category, Product, Purchase, PurchaseItem, UserProfile } from './types';
 import { DEFAULT_CATEGORIES, DEFAULT_PRODUCTS } from './defaultData';
 import { isValidCPF } from './utils/textFormatters';
+import { Capacitor } from '@capacitor/core';
+import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 
 export interface OfflineUser {
   uid: string;
@@ -776,9 +779,38 @@ export function useShoppingData() {
   const loginWithGoogle = async () => {
     setIsSyncing(true);
     try {
-      const provider = new GoogleAuthProvider();
-      const userCredential = await signInWithPopup(auth, provider);
-      const firebaseUser = userCredential.user;
+      let firebaseUser: User;
+
+      if (Capacitor.isNativePlatform()) {
+        try {
+          await GoogleAuth.initialize({
+            clientId: '901690992750-jbuc5p2bebr2940uaorqtn5qcp72q6cp.apps.googleusercontent.com',
+            scopes: ['profile', 'email'],
+            grantOfflineAccess: false,
+          });
+        } catch (initErr) {
+          console.warn('GoogleAuth initialize warning:', initErr);
+        }
+
+        try {
+          await GoogleAuth.signOut();
+        } catch (err) {}
+
+        const googleUser = await GoogleAuth.signIn();
+        const idToken = googleUser?.authentication?.idToken || (googleUser as any)?.idToken || (googleUser as any)?.authentication?.accessToken;
+
+        if (!idToken) {
+          throw new Error('Não foi possível obter o Token do Google.');
+        }
+
+        const credential = GoogleAuthProvider.credential(idToken);
+        const userCredential = await signInWithCredential(auth, credential);
+        firebaseUser = userCredential.user;
+      } else {
+        const provider = new GoogleAuthProvider();
+        const userCredential = await signInWithPopup(auth, provider);
+        firebaseUser = userCredential.user;
+      }
 
       // Enable offline mode
       localStorage.setItem('feira_offline_session', JSON.stringify({

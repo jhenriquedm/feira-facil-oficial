@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.mindflow.mercadofacil',
-  appName: 'Mercado Fácil - Gestão de Feira & Compras',
+  appId: 'com.gestaofinanceira.app',
+  appName: 'Feira Fácil',
   webDir: 'dist',
   server: {
     androidScheme: 'https',
@@ -18,6 +18,11 @@ const config: CapacitorConfig = {
     webContentsDebuggingEnabled: true
   },
   plugins: {
+    GoogleAuth: {
+      scopes: ['profile', 'email'],
+      serverClientId: '901690992750-jbuc5p2bebr2940uaorqtn5qcp72q6cp.apps.googleusercontent.com',
+      forceCodeForRefreshToken: false,
+    },
     SplashScreen: {
       launchShowDuration: 1500,
       backgroundColor: '#0284c7',

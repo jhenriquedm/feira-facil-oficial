@@ -17,6 +17,7 @@
     "android:open": "cap open android"
   },
   "dependencies": {
+    "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
