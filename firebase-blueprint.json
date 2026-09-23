@@ -101,21 +101,33 @@
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "The user profile configuration data"
     },
+    "users/{userId}/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Categories owned by the specific user"
+    },
+    "users/{userId}/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Catalog of products owned by the specific user"
+    },
+    "users/{userId}/purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/Purchase" },
+      "description": "Shopping lists and purchases owned by the specific user"
+    },
+    "users/{userId}/purchases/{purchaseId}/items/{itemId}": {
+      "schema": { "$ref": "#/entities/PurchaseItem" },
+      "description": "Items of a specific purchase"
+    },
     "categories/{categoryId}": {
       "schema": { "$ref": "#/entities/Category" },
-      "description": "Categories created by user for categorizing products"
+      "description": "Legacy categories for backward compatibility migration"
     },
     "products/{productId}": {
       "schema": { "$ref": "#/entities/Product" },
-      "description": "Catalog of products registered by users"
+      "description": "Legacy products for backward compatibility migration"
     },
     "purchases/{purchaseId}": {
       "schema": { "$ref": "#/entities/Purchase" },
-      "description": "Purchase logs / shopping list data"
-    },
-    "purchases/{purchaseId}/items/{itemId}": {
-      "schema": { "$ref": "#/entities/PurchaseItem" },
-      "description": "Items of a specific purchase"
+      "description": "Legacy purchases for backward compatibility migration"
     }
   }
 }

@@ -376,50 +376,14 @@ Diretrizes de Extração:
         // Timeout or network error on Open Food Facts
       }
 
-      // 2. If not found in Open Food Facts and Gemini is available, attempt AI inference
-      if (!found && apiKey) {
-        try {
-          const aiResponse = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
-            contents: `Identifique o produto comercial padrão do Brasil que corresponde ao código de barras (EAN-13 / GTIN): "${code}".
-            Se você souber com certeza razoável qual é o produto, retorne o nome do produto em português, a marca mais provável, a categoria típica de supermercado (Açougue, Bebidas, Limpeza, Hortifruti, Mercearia, Higiene, Padaria, Laticínios, Outros) e a unidade (Un, Kg, L, G, Pacote, Caixa). Se for um código desconhecido, retorne found: false.`,
-            config: {
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  found: { type: Type.BOOLEAN },
-                  productName: { type: Type.STRING },
-                  productBrand: { type: Type.STRING },
-                  categorySuggestion: { type: Type.STRING },
-                  unit: { type: Type.STRING }
-                },
-                required: ['found']
-              },
-              temperature: 0.2
-            }
-          });
-
-          const geminiResult = JSON.parse(aiResponse.text || '{}');
-          if (geminiResult.found && geminiResult.productName) {
-            found = true;
-            productName = geminiResult.productName;
-            productBrand = geminiResult.productBrand || '';
-            categorySuggestion = geminiResult.categorySuggestion || 'Mercearia';
-            unit = geminiResult.unit || 'Un';
-          }
-        } catch (e) {
-          // Gemini inference fallback
-        }
-      }
-
       return res.json({
         found,
+        notFoundInOpenFoodFacts: !found,
         barcode: code,
         name: productName,
         brand: productBrand,
         categorySuggestion: categorySuggestion || 'Mercearia',
-        unit: unit || 'Un'
+        unit: unit || 'Unidade'
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Erro ao consultar código de barras.' });

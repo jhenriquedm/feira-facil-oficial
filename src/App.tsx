@@ -18,8 +18,27 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 export default function App() {
   const data = useShoppingData();
   const [activeTab, setActiveTab] = useState<string>('home');
-  const [selectedPurchaseId, setSelectedPurchaseId] = useState<string | null>(null);
+  const [activePurchaseId, setActivePurchaseId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('feirafacil_active_purchase_id') || null;
+    } catch {
+      return null;
+    }
+  });
   const [sideMenuOpen, setSideMenuOpen] = useState(false);
+
+  const handleSelectPurchase = (id: string | null) => {
+    setActivePurchaseId(id);
+    try {
+      if (id) {
+        localStorage.setItem('feirafacil_active_purchase_id', id);
+      } else {
+        localStorage.removeItem('feirafacil_active_purchase_id');
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   // Sync primary theme color to CSS variable
   useEffect(() => {
@@ -43,13 +62,11 @@ export default function App() {
     }).catch((err) => console.warn('Capacitor detection warn:', err));
   }, []);
 
-  // Custom tab switching with purchaseId parameters
+  // Custom tab switching with purchaseId parameters - preserves open purchase across tabs
   const handleNavigate = (tab: string, purchaseId?: string) => {
     setActiveTab(tab);
     if (purchaseId) {
-      setSelectedPurchaseId(purchaseId);
-    } else {
-      setSelectedPurchaseId(null);
+      handleSelectPurchase(purchaseId);
     }
     setSideMenuOpen(false);
   };
@@ -82,6 +99,7 @@ export default function App() {
         findUserForRecovery={data.findUserForRecovery}
         resetPasswordDirect={data.resetPasswordDirect}
         loginWithGoogle={data.loginWithGoogle}
+        clearLocalStorage={data.clearLocalStorage}
         isOnline={data.isOnline}
       />
     );
@@ -287,8 +305,8 @@ export default function App() {
             toggleAllItemsChecked={data.toggleAllItemsChecked}
             completePurchase={data.completePurchase}
             reopenPurchase={data.reopenPurchase}
-            selectedPurchaseIdFromHome={selectedPurchaseId}
-            onClearSelectedPurchaseId={() => setSelectedPurchaseId(null)}
+            activePurchaseId={activePurchaseId}
+            onSelectPurchase={handleSelectPurchase}
             addProduct={data.addProduct}
           />
         )}

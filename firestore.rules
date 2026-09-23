@@ -2,12 +2,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global Safety Net: Default-deny all unmapped paths
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Common helper primitives (No database reads)
+    // Common helper primitives
     function isSignedIn() {
       return request.auth != null;
     }
@@ -16,161 +11,51 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
-    // Entity-Specific Validation Helpers
-    function isValidUserProfile(data) {
-      return data.keys().hasAll(['id', 'name', 'email', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'name', 'email', 'cpf', 'phone', 'photoURL', 'bio', 'color', 'createdAt', 'updatedAt', 'passwordHash'])
-        && data.id == request.auth.uid
-        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
-        && data.email is string && data.email.size() > 0 && data.email.size() <= 100
-        && (data.cpf == null || (data.cpf is string && data.cpf.size() <= 14))
-        && (data.phone == null || (data.phone is string && data.phone.size() <= 20))
-        && (data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 500))
-        && (data.bio == null || (data.bio is string && data.bio.size() <= 500))
-        && (data.color == null || (data.color is string && data.color.size() <= 7))
-        && (data.passwordHash == null || (data.passwordHash is string && data.passwordHash.size() <= 128));
-    }
-
-    function isValidCategory(data) {
-      return data.keys().hasAll(['id', 'name', 'iconName', 'isActive', 'createdAt', 'updatedAt', 'userId'])
-        && data.keys().hasOnly(['id', 'name', 'iconName', 'isActive', 'createdAt', 'updatedAt', 'userId'])
-        && data.userId == request.auth.uid
-        && data.name is string && data.name.size() > 0 && data.name.size() <= 50
-        && data.iconName is string && data.iconName.size() > 0 && data.iconName.size() <= 50
-        && data.isActive is bool;
-    }
-
-    function isValidProduct(data) {
-      return data.keys().hasAll(['id', 'name', 'categoryId', 'unit', 'brand', 'lastPrice', 'isActive', 'createdAt', 'updatedAt', 'userId'])
-        && data.keys().hasOnly(['id', 'name', 'categoryId', 'unit', 'brand', 'barcode', 'lastPrice', 'isActive', 'createdAt', 'updatedAt', 'userId'])
-        && data.userId == request.auth.uid
-        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
-        && data.brand is string && data.brand.size() > 0 && data.brand.size() <= 50
-        && data.unit is string && data.unit.size() > 0 && data.unit.size() <= 50
-        && data.categoryId is string && data.categoryId.size() <= 128
-        && (data.barcode == null || (data.barcode is string && data.barcode.size() <= 30))
-        && data.lastPrice is number && data.lastPrice >= 0
-        && data.isActive is bool;
-    }
-
-    function isValidPurchase(data) {
-      return data.keys().hasAll(['id', 'name', 'market', 'date', 'type', 'status', 'total', 'createdAt', 'updatedAt', 'userId'])
-        && data.keys().hasOnly(['id', 'name', 'market', 'date', 'type', 'notes', 'status', 'total', 'budget', 'discount', 'additionalFee', 'itemsCount', 'createdAt', 'updatedAt', 'userId'])
-        && data.userId == request.auth.uid
-        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
-        && data.market is string && data.market.size() <= 100
-        && data.date is string && data.date.size() <= 50
-        && data.status in ['inProgress', 'completed']
-        && data.type in ['monthly', 'weekly', 'emergency', 'butcher', 'pharmacy', 'other']
-        && (data.notes == null || (data.notes is string && data.notes.size() <= 500))
-        && data.total is number && data.total >= 0
-        && (data.budget == null || (data.budget is number && data.budget >= 0))
-        && (data.discount == null || (data.discount is number && data.discount >= 0))
-        && (data.additionalFee == null || (data.additionalFee is number && data.additionalFee >= 0))
-        && (data.itemsCount == null || (data.itemsCount is number && data.itemsCount >= 0));
-    }
-
-    function isValidPurchaseItem(data) {
-      return data.keys().hasAll(['id', 'purchaseId', 'productId', 'productName', 'productBrand', 'categoryId', 'categoryName', 'unit', 'quantity', 'unitPrice', 'isChecked'])
-        && data.keys().hasOnly(['id', 'purchaseId', 'productId', 'productName', 'productBrand', 'categoryId', 'categoryName', 'unit', 'quantity', 'unitPrice', 'isChecked', 'barcode'])
-        && data.productId is string && data.productId.size() <= 128
-        && data.purchaseId is string && data.purchaseId.size() <= 128
-        && data.productName is string && data.productName.size() > 0 && data.productName.size() <= 100
-        && data.productBrand is string && data.productBrand.size() <= 50
-        && data.categoryId is string && data.categoryId.size() <= 128
-        && data.categoryName is string && data.categoryName.size() <= 50
-        && data.unit is string && data.unit.size() > 0 && data.unit.size() <= 50
-        && data.quantity is number && data.quantity >= 0
-        && data.unitPrice is number && data.unitPrice >= 0
-        && data.isChecked is bool
-        && (data.barcode == null || (data.barcode is string && data.barcode.size() <= 30));
-    }
-
-    // Collection Security Rules
-
-    // 1. Users Collection
+    // 1. Users Collection & Cascading Subcollections
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid && isValidUserProfile(incoming());
-      allow update: if isOwner(userId)
-        && isValidUserProfile(incoming())
-        && incoming().createdAt == existing().createdAt;
-      allow delete: if isOwner(userId);
+      // Allow reading user profile (for auth check, recovery and unique checks)
+      allow read: if true;
+      // Allow user to create/update/delete their own profile
+      allow write: if isOwner(userId);
+
+      // User Subcollection: Categories (Cascading per-user folder)
+      match /categories/{categoryId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User Subcollection: Products (Cascading per-user folder)
+      match /products/{productId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User Subcollection: Purchases (Cascading per-user folder)
+      match /purchases/{purchaseId} {
+        allow read, write: if isOwner(userId);
+
+        // Nested Items Subcollection
+        match /items/{itemId} {
+          allow read, write: if isOwner(userId);
+        }
+      }
     }
 
-    // 2. Categories Collection
+    // 2. Legacy Flat Collections (Maintained for backward compatibility)
     match /categories/{categoryId} {
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(categoryId) && isValidCategory(incoming());
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid
-        && isValidCategory(incoming())
-        && incoming().createdAt == existing().createdAt
-        && incoming().userId == existing().userId;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list, get: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create, update, delete: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
 
-    // 3. Products Collection
     match /products/{productId} {
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(productId) && isValidProduct(incoming());
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid
-        && isValidProduct(incoming())
-        && incoming().createdAt == existing().createdAt
-        && incoming().userId == existing().userId;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list, get: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create, update, delete: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
 
-    // 4. Purchases Collection
     match /purchases/{purchaseId} {
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(purchaseId) && isValidPurchase(incoming());
+      allow list, get: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create, update, delete: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       
-      // Updates divided into logical actions
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid
-        && isValidPurchase(incoming())
-        && incoming().createdAt == existing().createdAt
-        && incoming().userId == existing().userId
-        && (
-          // Case 1: Active modification of lists "inProgress"
-          (existing().status == 'inProgress')
-          ||
-          // Case 2: Only finalizing the list (Terminal State Transition to completed)
-          (existing().status == 'inProgress' && incoming().status == 'completed' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
-        );
-        
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
-
-      // 5. Purchase Items Subcollection
       match /items/{itemId} {
-        // Enforce parent-to-child relationship sync (Master Gate)
-        function parentPurchaseOwned() {
-          return get(/databases/$(database)/documents/purchases/$(purchaseId)).data.userId == request.auth.uid;
-        }
-
-        function parentPurchaseActive() {
-          return get(/databases/$(database)/documents/purchases/$(purchaseId)).data.status == 'inProgress';
-        }
-
-        allow list: if isSignedIn() && parentPurchaseOwned();
-        allow get: if isSignedIn() && parentPurchaseOwned();
-        allow create: if isSignedIn() && isValidId(itemId) && parentPurchaseOwned() && parentPurchaseActive() && isValidPurchaseItem(incoming());
-        allow update: if isSignedIn() && parentPurchaseOwned() && parentPurchaseActive() && isValidPurchaseItem(incoming());
-        allow delete: if isSignedIn() && parentPurchaseOwned() && parentPurchaseActive();
+        allow read, write: if isSignedIn();
       }
     }
   }

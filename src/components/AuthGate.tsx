@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Lock, Mail, User, Check, AlertCircle, RefreshCw, Key, 
   Eye, EyeOff, ShieldCheck, ArrowLeft, ArrowRight, CheckCircle2, 
-  CreditCard, Search
+  CreditCard, Search, Trash2
 } from 'lucide-react';
 import { AppLogo } from './AppLogo';
 import { sanitizeAndCapitalize, formatCPF, isValidCPF } from '../utils/textFormatters';
@@ -13,6 +13,7 @@ interface AuthGateProps {
   findUserForRecovery: (identifier: string) => Promise<{ id: string; name: string; email: string; cpf?: string }>;
   resetPasswordDirect: (userId: string, newPass: string, confirmPass: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
+  clearLocalStorage?: () => void;
   isOnline: boolean;
 }
 
@@ -22,6 +23,7 @@ export function AuthGate({
   findUserForRecovery,
   resetPasswordDirect,
   loginWithGoogle,
+  clearLocalStorage,
   isOnline
 }: AuthGateProps) {
   const [mode, setMode] = useState<'login' | 'register' | 'forgotPassword'>('login');
@@ -213,6 +215,25 @@ export function AuthGate({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleClearLocalStorage = () => {
+    if (clearLocalStorage) {
+      clearLocalStorage();
+    } else {
+      localStorage.clear();
+      sessionStorage.clear();
+    }
+    setName('');
+    setIdentifier('');
+    setEmail('');
+    setCpf('');
+    setPassword('');
+    setConfirmPassword('');
+    setRecoveryIdentifier('');
+    setIdentifiedUser(null);
+    setErrorMsg('');
+    showTimedNotification('Armazenamento local limpo com sucesso! Cache resetado.');
   };
 
   return (
@@ -643,6 +664,19 @@ export function AuthGate({
             )}
           </div>
         )}
+      </div>
+
+      {/* Reset / Clear Local Storage Button */}
+      <div className="mt-4 flex justify-center">
+        <button
+          type="button"
+          onClick={handleClearLocalStorage}
+          title="Limpar armazenamento local e dados salvos no navegador"
+          className="text-xs font-bold text-neutral-400 hover:text-red-600 transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-white/80 active:scale-95 shadow-2xs"
+        >
+          <Trash2 size={14} />
+          Limpar Armazenamento Local
+        </button>
       </div>
     </div>
   );

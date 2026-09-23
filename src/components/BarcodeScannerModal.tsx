@@ -3,9 +3,9 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { 
   Camera, X, Flashlight, RefreshCw, Upload, CheckCircle2, 
   AlertCircle, Sparkles, Loader2, Barcode as BarcodeIcon, Search,
-  Image as ImageIcon, ShieldCheck, ExternalLink, Smartphone
+  Image as ImageIcon, Smartphone, Edit3
 } from 'lucide-react';
-import { useMediaPermissions, PermissionStateStatus } from '../useMediaPermissions';
+import { normalizeProductUnit, getUnitLabel } from '../utils/units';
 
 interface BarcodeScannerModalProps {
   isOpen: boolean;
@@ -28,13 +28,12 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'camera' | 'gallery' | 'manual'>('camera');
   const [isScanning, setIsScanning] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
   const [manualCode, setManualCode] = useState('');
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [isDecodingFile, setIsDecodingFile] = useState(false);
-  const [showHowToUnlock, setShowHowToUnlock] = useState(false);
+  const [fileDecodeError, setFileDecodeError] = useState<string | null>(null);
   const [detectedResult, setDetectedResult] = useState<{
     barcode: string;
     name?: string;
@@ -43,13 +42,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     unit?: string;
     found?: boolean;
   } | null>(null);
-
-  const {
-    cameraStatus,
-    requestCameraPermission,
-    checkCameraPermission,
-    errorMessage: permissionError,
-  } = useMediaPermissions();
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
@@ -84,11 +76,11 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   };
 
   const lookupBarcode = async (rawCode: string) => {
-    const clean = rawCode.trim().replace(/\D/g, '');
+    const clean = rawCode.trim().replace(/\D/g, '').slice(0, 14);
     if (!clean) return;
 
     setIsLookingUp(true);
-    setDetectedResult({ barcode: clean });
+    setDetectedResult({ barcode: clean, found: undefined });
 
     try {
       const res = await fetch(`/api/barcode/lookup?code=${encodeURIComponent(clean)}`);
@@ -99,12 +91,21 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           name: data.name || '',
           brand: data.brand || '',
           category: data.categorySuggestion || '',
-          unit: data.unit || 'Un',
+          unit: data.unit || 'Unidade',
           found: Boolean(data.found)
+        });
+      } else {
+        setDetectedResult({
+          barcode: clean,
+          found: false
         });
       }
     } catch (e) {
       console.warn('Erro ao consultar código de barras:', e);
+      setDetectedResult({
+        barcode: clean,
+        found: false
+      });
     } finally {
       setIsLookingUp(false);
     }
@@ -132,7 +133,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   };
 
   const startCamera = async () => {
-    setCameraError(null);
     setIsScanning(true);
 
     try {
@@ -183,20 +183,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         setHasTorch(false);
       }
     } catch (err: any) {
-      console.error('Camera init error:', err);
+      // Quiet failover: do not show permission error popups or banners
       setIsScanning(false);
-      if (err.name === 'NotAllowedError' || String(err).includes('Permission')) {
-        setCameraError('Permissão de acesso à câmera negada. Você pode escolher uma foto da galeria ou digitar o código.');
-      } else {
-        setCameraError('Não foi possível iniciar a câmera ao vivo. Use a galeria do celular ou digite o código.');
-      }
-    }
-  };
-
-  const handleRequestAndStartCamera = async () => {
-    const granted = await requestCameraPermission();
-    if (granted) {
-      startCamera();
     }
   };
 
@@ -216,7 +204,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   // Process image from smartphone gallery or photo file
   const handleProcessImageFile = async (file: File) => {
     setIsDecodingFile(true);
-    setCameraError(null);
+    setFileDecodeError(null);
     try {
       const html5QrCode = new Html5Qrcode('barcode-file-hidden-canvas', {
         formatsToSupport: [
@@ -233,7 +221,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       playBeep();
       await lookupBarcode(decodedText);
     } catch (err) {
-      setCameraError('Nenhum código de barras legível foi encontrado nesta foto. Tente uma foto mais nítida com boa iluminação.');
+      setFileDecodeError('Nenhum código de barras legível foi encontrado nesta foto. Tente uma foto mais nítida com boa iluminação ou digite os números.');
     } finally {
       setIsDecodingFile(false);
     }
@@ -253,23 +241,31 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       suggestedName: detectedResult.name,
       suggestedBrand: detectedResult.brand,
       suggestedCategory: detectedResult.category,
-      suggestedUnit: detectedResult.unit
+      suggestedUnit: normalizeProductUnit(detectedResult.unit)
     });
     onClose();
+  };
+
+  // Switch to manual edit mode with current barcode
+  const handleReviewAndType = () => {
+    if (detectedResult?.barcode) {
+      setManualCode(detectedResult.barcode);
+    }
+    setDetectedResult(null);
+    setActiveTab('manual');
   };
 
   useEffect(() => {
     if (isOpen) {
       setDetectedResult(null);
-      setCameraError(null);
+      setFileDecodeError(null);
       setManualCode('');
       setActiveTab('camera');
-      checkCameraPermission();
 
-      // If camera is already granted, auto-start camera after modal transition
+      // Auto-start camera after modal transition
       const t = setTimeout(() => {
         startCamera();
-      }, 300);
+      }, 250);
       return () => {
         clearTimeout(t);
         stopCamera();
@@ -293,7 +289,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             <div>
               <h3 className="font-black text-base text-neutral-900 leading-tight">{title}</h3>
               <p className="text-xs text-neutral-500 font-medium">
-                Câmera, galeria de fotos ou digitação
+                Câmera nativa, galeria de fotos ou digitação direta
               </p>
             </div>
           </div>
@@ -325,7 +321,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               }`}
             >
               <Camera size={15} />
-              <span>Câmera ao Vivo</span>
+              <span>Câmera</span>
             </button>
 
             <button
@@ -367,87 +363,142 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           {detectedResult ? (
             /* Result Confirmation Card */
             <div className="space-y-4 animate-in zoom-in-95 duration-200">
-              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start gap-3">
-                <CheckCircle2 size={24} className="text-emerald-600 shrink-0 mt-0.5" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700">
-                      Código Identificado
-                    </span>
-                    {detectedResult.found && (
-                      <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-200 text-emerald-800 rounded-full flex items-center gap-1">
-                        <Sparkles size={10} /> Base Oficial Encontrada
-                      </span>
-                    )}
+              {detectedResult.found ? (
+                /* Found in Open Food Facts */
+                <>
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start gap-3">
+                    <CheckCircle2 size={24} className="text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700">
+                          Código Identificado
+                        </span>
+                        <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-200 text-emerald-800 rounded-full flex items-center gap-1">
+                          <Sparkles size={10} /> Base Oficial Encontrada (Open Food Facts)
+                        </span>
+                      </div>
+                      <p className="font-mono text-xl font-black text-neutral-950 mt-1">
+                        {detectedResult.barcode}
+                      </p>
+                    </div>
                   </div>
-                  <p className="font-mono text-xl font-black text-neutral-950 mt-1">
-                    {detectedResult.barcode}
-                  </p>
-                </div>
-              </div>
 
-              {isLookingUp ? (
-                <div className="p-5 border border-neutral-200 rounded-2xl flex items-center justify-center gap-3 text-neutral-500 bg-neutral-50">
-                  <Loader2 className="animate-spin text-sky-500" size={20} />
-                  <span className="text-xs font-semibold">Buscando detalhes do produto...</span>
-                </div>
+                  {isLookingUp ? (
+                    <div className="p-5 border border-neutral-200 rounded-2xl flex items-center justify-center gap-3 text-neutral-500 bg-neutral-50">
+                      <Loader2 className="animate-spin text-sky-500" size={20} />
+                      <span className="text-xs font-semibold">Buscando detalhes do produto...</span>
+                    </div>
+                  ) : (
+                    <div className="bg-neutral-50 p-4 rounded-2xl border border-neutral-200 space-y-3">
+                      <div className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider">
+                        Dados Sugeridos para Preenchimento
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-semibold text-neutral-500">Nome do Produto</label>
+                        <p className="font-bold text-neutral-900 text-sm">
+                          {detectedResult.name || '(Definir nome no formulário)'}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-neutral-200">
+                        <div>
+                          <label className="text-[10px] font-semibold text-neutral-400">Marca</label>
+                          <p className="text-xs font-bold text-neutral-800 truncate">
+                            {detectedResult.brand || 'Não informada'}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-neutral-400">Categoria</label>
+                          <p className="text-xs font-bold text-sky-600 truncate">
+                            {detectedResult.category || 'Geral'}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-neutral-400">Unidade</label>
+                          <p className="text-xs font-bold text-neutral-800">
+                            {getUnitLabel(detectedResult.unit)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col-reverse sm:flex-row gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDetectedResult(null);
+                        startCamera();
+                      }}
+                      className="w-full sm:flex-1 py-3 px-4 border border-neutral-200 rounded-2xl text-xs font-bold text-neutral-700 hover:bg-neutral-50 transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <RefreshCw size={14} />
+                      <span>Ler Outro</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmApply}
+                      className="w-full sm:flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-2xl text-xs font-black transition-all shadow-sm flex items-center justify-center gap-1.5"
+                    >
+                      <CheckCircle2 size={16} />
+                      <span>Preencher Cadastro</span>
+                    </button>
+                  </div>
+                </>
               ) : (
-                <div className="bg-neutral-50 p-4 rounded-2xl border border-neutral-200 space-y-3">
-                  <div className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider">
-                    Dados Sugeridos para Preenchimento
+                /* NOT Found in Open Food Facts */
+                <div className="space-y-4">
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-2">
+                    <div className="flex items-start gap-2.5">
+                      <AlertCircle size={22} className="text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <h4 className="font-extrabold text-sm text-amber-900 leading-snug">
+                          Código não encontrado na Open Food Facts
+                        </h4>
+                        <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                          O código <strong className="font-mono bg-amber-100/80 px-1 py-0.5 rounded text-amber-950">{detectedResult.barcode}</strong> não foi localizado na base oficial de produtos.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="p-2.5 bg-white/80 rounded-xl border border-amber-200/60 text-xs text-amber-950 font-medium leading-relaxed text-justify">
+                      💡 <strong>Dica:</strong> Sugerimos revisar os números impressos na embalagem e verificar se o código de barras foi digitado ou escaneado corretamente.
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="text-[11px] font-semibold text-neutral-500">Nome do Produto</label>
-                    <p className="font-bold text-neutral-900 text-sm">
-                      {detectedResult.name || '(Definir nome no formulário)'}
-                    </p>
-                  </div>
+                  <div className="space-y-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleReviewAndType}
+                      className="w-full py-3 px-4 bg-sky-500 hover:bg-sky-600 active:scale-98 text-white rounded-2xl text-xs font-black transition-all shadow-sm flex items-center justify-center gap-2"
+                    >
+                      <Edit3 size={15} />
+                      <span>Revisar e Digitar Novamente</span>
+                    </button>
 
-                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-neutral-200">
-                    <div>
-                      <label className="text-[10px] font-semibold text-neutral-400">Marca</label>
-                      <p className="text-xs font-bold text-neutral-800 truncate">
-                        {detectedResult.brand || 'Não informada'}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-neutral-400">Categoria</label>
-                      <p className="text-xs font-bold text-sky-600 truncate">
-                        {detectedResult.category || 'Geral'}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-neutral-400">Unidade</label>
-                      <p className="text-xs font-bold text-neutral-800">
-                        {detectedResult.unit || 'Un'}
-                      </p>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={confirmApply}
+                      className="w-full py-3 px-4 bg-neutral-100 hover:bg-neutral-200 active:scale-98 text-neutral-800 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border border-neutral-200"
+                    >
+                      <CheckCircle2 size={15} className="text-emerald-600" />
+                      <span>O código está correto (Cadastrar Manualmente)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDetectedResult(null);
+                        startCamera();
+                      }}
+                      className="w-full py-2.5 px-4 text-xs font-bold text-neutral-500 hover:text-neutral-800 transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <RefreshCw size={13} />
+                      <span>Ler Outro Código</span>
+                    </button>
                   </div>
                 </div>
               )}
-
-              <div className="flex flex-col-reverse sm:flex-row gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDetectedResult(null);
-                    startCamera();
-                  }}
-                  className="w-full sm:flex-1 py-3 px-4 border border-neutral-200 rounded-2xl text-xs font-bold text-neutral-700 hover:bg-neutral-50 transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <RefreshCw size={14} />
-                  <span>Ler Outro</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmApply}
-                  className="w-full sm:flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-2xl text-xs font-black transition-all shadow-sm flex items-center justify-center gap-1.5"
-                >
-                  <CheckCircle2 size={16} />
-                  <span>Preencher Cadastro</span>
-                </button>
-              </div>
             </div>
           ) : activeTab === 'camera' ? (
             /* Live Camera View */
@@ -456,7 +507,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 <div id={readerElementId} className="w-full h-full object-cover" />
 
                 {/* Laser Scanning Overlay Animation */}
-                {isScanning && !cameraError && (
+                {isScanning && (
                   <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
                     <div className="relative w-64 h-36 border-2 border-sky-400/90 rounded-2xl shadow-[0_0_15px_rgba(56,189,248,0.5)] flex items-center justify-center overflow-hidden">
                       <div className="w-full h-0.5 bg-sky-400 shadow-[0_0_8px_#38bdf8] animate-pulse transition-all duration-1000" />
@@ -467,7 +518,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                       <span className="absolute bottom-2 right-2 w-3 h-3 border-b-2 border-r-2 border-sky-400" />
                     </div>
                     <span className="mt-3 px-3 py-1 bg-black/70 backdrop-blur-md rounded-full text-[11px] font-semibold text-sky-200">
-                      Alinhe o código de barras no quadro
+                      Aponte a câmera para o código de barras
                     </span>
                   </div>
                 )}
@@ -489,61 +540,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 )}
               </div>
 
-              {/* Permission & Error Banner */}
-              {cameraError && (
-                <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-2.5 text-xs text-amber-900">
-                  <div className="flex items-start gap-2 font-bold">
-                    <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
-                    <span>{cameraError}</span>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={handleRequestAndStartCamera}
-                      className="px-3 py-1.5 bg-sky-600 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs"
-                    >
-                      <ShieldCheck size={14} />
-                      <span>Solicitar Permissão</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('gallery')}
-                      className="px-3 py-1.5 bg-emerald-600 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs"
-                    >
-                      <ImageIcon size={14} />
-                      <span>Escolher da Galeria</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowHowToUnlock(!showHowToUnlock)}
-                      className="px-3 py-1.5 text-sky-700 font-bold underline text-[11px]"
-                    >
-                      Como desbloquear no celular
-                    </button>
-                  </div>
-
-                  {showHowToUnlock && (
-                    <div className="p-3 bg-white rounded-xl border border-amber-200 text-[11px] text-neutral-700 space-y-1">
-                      <p className="font-bold text-neutral-900">Como liberar a câmera no navegador:</p>
-                      <ol className="list-decimal pl-4 space-y-0.5">
-                        <li>Toque no ícone de <strong>cadeado/configurações</strong> na barra de URL.</li>
-                        <li>Selecione <strong>Permissões</strong> &gt; <strong>Câmera</strong>.</li>
-                        <li>Escolha <strong>Permitir</strong> e volte ao app.</li>
-                      </ol>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Mobile Quick Camera Fallback & Gallery Trigger */}
-              <div className="flex items-center justify-between gap-2 pt-1">
+              {/* Direct Native Camera & Gallery Triggers (Native Mobile Direct Access) */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => cameraCaptureInputRef.current?.click()}
-                  className="flex-1 py-2 px-3 bg-neutral-100 hover:bg-neutral-200 rounded-xl text-neutral-700 text-xs font-bold flex items-center justify-center gap-1.5"
+                  className="py-2.5 px-3 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors active:scale-98"
                 >
-                  <Smartphone size={14} />
+                  <Smartphone size={15} />
                   <span>Foto com Câmera Nativa</span>
                 </button>
                 <input
@@ -558,11 +562,18 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 <button
                   type="button"
                   onClick={() => galleryInputRef.current?.click()}
-                  className="flex-1 py-2 px-3 bg-neutral-100 hover:bg-neutral-200 rounded-xl text-neutral-700 text-xs font-bold flex items-center justify-center gap-1.5"
+                  className="py-2.5 px-3 bg-neutral-100 hover:bg-neutral-200 border border-neutral-200 text-neutral-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors active:scale-98"
                 >
-                  <ImageIcon size={14} />
+                  <ImageIcon size={15} />
                   <span>Galeria de Fotos</span>
                 </button>
+                <input
+                  ref={galleryInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
               </div>
             </div>
           ) : activeTab === 'gallery' ? (
@@ -577,7 +588,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                     Galeria de Fotos do Smartphone
                   </h4>
                   <p className="text-xs text-neutral-500 mt-1 max-w-xs mx-auto leading-relaxed">
-                    Selecione uma foto da embalagem, do código de barras ou recibo da sua galeria de fotos.
+                    Selecione uma foto da embalagem ou do código de barras diretamente do seu álbum.
                   </p>
                 </div>
 
@@ -611,37 +622,46 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 />
               </div>
 
-              {cameraError && (
+              {fileDecodeError && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex items-start gap-2 text-left">
                   <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
-                  <p className="text-[11px] leading-relaxed">{cameraError}</p>
+                  <p className="text-[11px] leading-relaxed">{fileDecodeError}</p>
                 </div>
               )}
             </div>
           ) : (
-            /* Manual Barcode Input */
+            /* Manual Barcode Input with 14 Character Retail Limit */
             <div className="space-y-4 py-2">
               <div className="text-center space-y-1">
                 <h4 className="font-black text-neutral-900 text-sm">
-                  Inserir Código Numérico
+                  Digitar Código de Barras
                 </h4>
                 <p className="text-xs text-neutral-500">
-                  Digite os dígitos numéricos impressos abaixo das barras do produto
+                  Digite os dígitos numéricos da embalagem (limite máximo de 14 dígitos padrão GTIN/EAN)
                 </p>
               </div>
 
-              <div className="relative">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={manualCode}
-                  onChange={(e) => setManualCode(e.target.value.replace(/\D/g, ''))}
-                  placeholder="Ex: 7891000100103"
-                  className="w-full px-4 py-3 pl-11 text-base sm:text-lg font-mono tracking-widest text-center border border-neutral-200 bg-white text-neutral-950 rounded-2xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
-                  autoFocus
-                />
-                <BarcodeIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" size={20} />
+              <div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={14}
+                    value={manualCode}
+                    onChange={(e) => setManualCode(e.target.value.replace(/\D/g, '').slice(0, 14))}
+                    placeholder="Ex: 7891000100103"
+                    className="w-full px-4 py-3 pl-11 text-base sm:text-lg font-mono tracking-widest text-center border border-neutral-200 bg-white text-neutral-950 rounded-2xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
+                    autoFocus
+                  />
+                  <BarcodeIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" size={20} />
+                </div>
+                <div className="flex justify-between items-center px-1 mt-1 text-[11px] text-neutral-400 font-mono">
+                  <span>Padrão EAN-8, EAN-13 ou GTIN-14</span>
+                  <span className={manualCode.length === 14 ? 'font-bold text-amber-600' : ''}>
+                    {manualCode.length}/14 dígitos
+                  </span>
+                </div>
               </div>
 
               <button
@@ -653,12 +673,12 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 {isLookingUp ? (
                   <>
                     <Loader2 size={16} className="animate-spin" />
-                    <span>Consultando...</span>
+                    <span>Consultando na base...</span>
                   </>
                 ) : (
                   <>
                     <Search size={16} />
-                    <span>Consultar e Preencher</span>
+                    <span>Consultar e Identificar</span>
                   </>
                 )}
               </button>

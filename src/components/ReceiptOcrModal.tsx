@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Category, Product } from '../types';
 import { sanitizeAndCapitalize } from '../utils/textFormatters';
+import { PRODUCT_UNITS, normalizeProductUnit } from '../utils/units';
 
 export interface OcrExtractedItem {
   id: string;
@@ -198,7 +199,7 @@ export function ReceiptOcrModal({
         id: `ocr_${Date.now()}_${idx}`,
         name: it.name || 'Produto sem nome',
         quantity: Number(it.quantity) > 0 ? Number(it.quantity) : 1,
-        unit: it.unit || 'Un',
+        unit: normalizeProductUnit(it.unit || 'Un'),
         unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0,
         totalPrice: Number(it.totalPrice) >= 0 ? Number(it.totalPrice) : (Number(it.quantity) * Number(it.unitPrice)),
         category: it.category || 'Mercearia',
@@ -652,12 +653,12 @@ export function ReceiptOcrModal({
                       <div className="w-16">
                         <label className="block text-[9px] uppercase font-bold text-neutral-400">Unid</label>
                         <select
-                          value={item.unit}
+                          value={normalizeProductUnit(item.unit)}
                           onChange={(e) => handleUpdateItem(item.id, 'unit', e.target.value)}
                           className="w-full px-1.5 py-1 text-base sm:text-xs bg-white border border-neutral-200 rounded-lg text-neutral-900 focus:outline-none overflow-y-auto max-h-48 cursor-pointer"
                         >
-                          {['Bandeja', 'Caixa', 'Garrafa', 'Grama', 'Kg', 'Lata', 'Litros', 'Pacote', 'Pote', 'Saco', 'Unidade'].map(u => (
-                            <option key={u} value={u}>{u}</option>
+                          {PRODUCT_UNITS.map(u => (
+                            <option key={u.value} value={u.value}>{u.label}</option>
                           ))}
                         </select>
                       </div>

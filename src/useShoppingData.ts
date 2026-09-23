@@ -218,7 +218,7 @@ export function useShoppingData() {
           canUseOffline: true
         }));
 
-        // 0. Listen for User Profile Document in Firestore
+        // 0. Listen for User Profile Document in Firestore /users/{uid}
         const userDocRef = doc(db, 'users', uid);
         const unsubProfile = onSnapshot(
           userDocRef,
@@ -261,7 +261,7 @@ export function useShoppingData() {
               setUserProfile(fallbackProfile);
               saveUserData('user_profile', fallbackProfile, uid);
 
-              // Auto-seed this complete profile to Firestore
+              // Auto-seed this complete profile to Firestore immediately
               setDoc(userDocRef, cleanPayload(fallbackProfile), { merge: true }).catch(err => {
                 console.warn("Could not auto-seed profile to Firestore:", err);
               });
@@ -272,19 +272,41 @@ export function useShoppingData() {
           }
         );
 
-        // 1. Listen for categories
-        const qCategories = query(collection(db, 'categories'), where('userId', '==', uid));
+        // 1. Listen for categories in CASCADE subcollection: /users/{uid}/categories
+        const userCategoriesRef = collection(db, 'users', uid, 'categories');
         const unsubCategories = onSnapshot(
-          qCategories, 
+          userCategoriesRef, 
           async (snapshot) => {
             if (snapshot.empty) {
+              // Migration check: verify if user has legacy categories in root /categories
+              try {
+                const legacyQuery = query(collection(db, 'categories'), where('userId', '==', uid));
+                const legacySnap = await getDocs(legacyQuery);
+                if (!legacySnap.empty) {
+                  const batch = writeBatch(db);
+                  const migratedCats: Category[] = [];
+                  legacySnap.forEach((d) => {
+                    const data = d.data() as Category;
+                    batch.set(doc(db, 'users', uid, 'categories', d.id), data);
+                    migratedCats.push({ ...data, id: d.id });
+                  });
+                  await batch.commit();
+                  migratedCats.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+                  setCategories(migratedCats);
+                  saveUserData('categories', migratedCats, uid);
+                  return;
+                }
+              } catch (migErr) {
+                console.warn("Legacy category migration check skipped:", migErr);
+              }
+
               const defaultCats = DEFAULT_CATEGORIES(uid);
               setCategories(defaultCats);
               saveUserData('categories', defaultCats, uid);
               try {
                 const batch = writeBatch(db);
                 defaultCats.forEach((cat) => {
-                  const catRef = doc(db, 'categories', cat.id);
+                  const catRef = doc(db, 'users', uid, 'categories', cat.id);
                   batch.set(catRef, cat);
                 });
                 await batch.commit();
@@ -293,47 +315,96 @@ export function useShoppingData() {
               }
             } else {
               const cats: Category[] = [];
-              snapshot.forEach((doc) => cats.push({ id: doc.id, ...doc.data() } as Category));
+              snapshot.forEach((doc) => cats.push({ ...doc.data(), id: doc.id } as Category));
               cats.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
               setCategories(cats);
               saveUserData('categories', cats, uid);
             }
           },
           (error) => {
-            handleFirestoreError(error, OperationType.GET, 'categories');
+            handleFirestoreError(error, OperationType.GET, `users/${uid}/categories`);
           }
         );
 
-        // 2. Listen for products
-        const qProducts = query(collection(db, 'products'), where('userId', '==', uid));
+        // 2. Listen for products in CASCADE subcollection: /users/{uid}/products
+        const userProductsRef = collection(db, 'users', uid, 'products');
         const unsubProducts = onSnapshot(
-          qProducts, 
-          (snapshot) => {
+          userProductsRef, 
+          async (snapshot) => {
+            if (snapshot.empty) {
+              // Migration check: check legacy root /products
+              try {
+                const legacySnap = await getDocs(query(collection(db, 'products'), where('userId', '==', uid)));
+                if (!legacySnap.empty) {
+                  const batch = writeBatch(db);
+                  const migratedProds: Product[] = [];
+                  legacySnap.forEach((d) => {
+                    const data = d.data() as Product;
+                    batch.set(doc(db, 'users', uid, 'products', d.id), data);
+                    migratedProds.push({ ...data, id: d.id });
+                  });
+                  await batch.commit();
+                  migratedProds.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+                  setProducts(migratedProds);
+                  saveUserData('products', migratedProds, uid);
+                  return;
+                }
+              } catch (migErr) {
+                console.warn("Legacy products migration check skipped:", migErr);
+              }
+            }
             const prods: Product[] = [];
-            snapshot.forEach((doc) => prods.push({ id: doc.id, ...doc.data() } as Product));
+            snapshot.forEach((doc) => prods.push({ ...doc.data(), id: doc.id } as Product));
+            prods.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
             setProducts(prods);
             saveUserData('products', prods, uid);
           },
           (error) => {
-            handleFirestoreError(error, OperationType.GET, 'products');
+            handleFirestoreError(error, OperationType.GET, `users/${uid}/products`);
           }
         );
 
-        // 3. Listen for purchases
+        // 3. Listen for purchases in CASCADE subcollection: /users/{uid}/purchases
         const itemUnsubs: Record<string, () => void> = {};
-        const qPurchases = query(collection(db, 'purchases'), where('userId', '==', uid));
+        const userPurchasesRef = collection(db, 'users', uid, 'purchases');
         const unsubPurchases = onSnapshot(
-          qPurchases, 
-          (snapshot) => {
+          userPurchasesRef, 
+          async (snapshot) => {
+            if (snapshot.empty) {
+              // Migration check: check legacy root /purchases
+              try {
+                const legacySnap = await getDocs(query(collection(db, 'purchases'), where('userId', '==', uid)));
+                if (!legacySnap.empty) {
+                  const batch = writeBatch(db);
+                  const migratedPurs: Purchase[] = [];
+                  for (const pDoc of legacySnap.docs) {
+                    const data = pDoc.data() as Purchase;
+                    batch.set(doc(db, 'users', uid, 'purchases', pDoc.id), data);
+                    migratedPurs.push({ ...data, id: pDoc.id });
+                    const itemsSnap = await getDocs(collection(db, 'purchases', pDoc.id, 'items'));
+                    itemsSnap.forEach(iDoc => {
+                      batch.set(doc(db, 'users', uid, 'purchases', pDoc.id, 'items', iDoc.id), iDoc.data());
+                    });
+                  }
+                  await batch.commit();
+                  setPurchases(migratedPurs);
+                  saveUserData('purchases', migratedPurs, uid);
+                  return;
+                }
+              } catch (migErr) {
+                console.warn("Legacy purchases migration check skipped:", migErr);
+              }
+            }
+
             const purs: Purchase[] = [];
             snapshot.forEach((doc) => purs.push({ id: doc.id, ...doc.data() } as Purchase));
             setPurchases(purs);
             saveUserData('purchases', purs, uid);
             
-            // For each purchase, set up individual real-time listeners for items
+            // For each purchase, set up individual real-time listeners for items in /users/{uid}/purchases/{p.id}/items
             purs.forEach((p) => {
               if (itemUnsubs[p.id]) return; // Listener already active
-              const qItems = collection(db, 'purchases', p.id, 'items');
+              const qItems = collection(db, 'users', uid, 'purchases', p.id, 'items');
               itemUnsubs[p.id] = onSnapshot(
                 qItems, 
                 (itemSnapshot) => {
@@ -346,13 +417,13 @@ export function useShoppingData() {
                   });
                 },
                 (error) => {
-                  handleFirestoreError(error, OperationType.GET, `purchases/${p.id}/items`);
+                  handleFirestoreError(error, OperationType.GET, `users/${uid}/purchases/${p.id}/items`);
                 }
               );
             });
           },
           (error) => {
-            handleFirestoreError(error, OperationType.GET, 'purchases');
+            handleFirestoreError(error, OperationType.GET, `users/${uid}/purchases`);
           }
         );
 
@@ -489,10 +560,10 @@ export function useShoppingData() {
       }
     );
 
-    // 1. Categories listener
-    const qCategories = query(collection(db, 'categories'), where('userId', '==', uid));
+    // 1. Categories listener in users/{uid}/categories
+    const userCategoriesRef = collection(db, 'users', uid, 'categories');
     const unsubCategories = onSnapshot(
-      qCategories,
+      userCategoriesRef,
       async (snapshot) => {
         if (snapshot.empty) {
           const defaultCats = DEFAULT_CATEGORIES(uid);
@@ -501,7 +572,7 @@ export function useShoppingData() {
           try {
             const batch = writeBatch(db);
             defaultCats.forEach((cat) => {
-              const catRef = doc(db, 'categories', cat.id);
+              const catRef = doc(db, 'users', uid, 'categories', cat.id);
               batch.set(catRef, cat);
             });
             await batch.commit();
@@ -521,10 +592,10 @@ export function useShoppingData() {
       }
     );
 
-    // 2. Products listener
-    const qProducts = query(collection(db, 'products'), where('userId', '==', uid));
+    // 2. Products listener in users/{uid}/products
+    const userProductsRef = collection(db, 'users', uid, 'products');
     const unsubProducts = onSnapshot(
-      qProducts,
+      userProductsRef,
       (snapshot) => {
         const prods: Product[] = [];
         snapshot.forEach((d) => prods.push({ id: d.id, ...d.data() } as Product));
@@ -539,10 +610,10 @@ export function useShoppingData() {
       }
     );
 
-    // 3. Purchases listener
-    const qPurchases = query(collection(db, 'purchases'), where('userId', '==', uid));
+    // 3. Purchases listener in users/{uid}/purchases
+    const userPurchasesRef = collection(db, 'users', uid, 'purchases');
     const unsubPurchases = onSnapshot(
-      qPurchases,
+      userPurchasesRef,
       (snapshot) => {
         const purList: Purchase[] = [];
         snapshot.forEach((d) => purList.push({ id: d.id, ...d.data() } as Purchase));
@@ -595,16 +666,18 @@ export function useShoppingData() {
       }
     }
 
-    // Check if email already registered locally
+    // Check if email already registered locally (only when offline)
     const existingLocal = getLocalUsers();
-    if (existingLocal.some(u => u.email && u.email.toLowerCase() === cleanedEmail)) {
-      throw new Error("Este endereço de e-mail já está cadastrado.");
-    }
-    if (cleanCpfDigits && existingLocal.some(u => u.cpf && u.cpf === cleanCpfDigits)) {
-      throw new Error("Este CPF já está cadastrado em outra conta.");
+    if (!isOnline) {
+      if (existingLocal.some(u => u.email && u.email.toLowerCase() === cleanedEmail)) {
+        throw new Error("Este endereço de e-mail já está cadastrado no modo offline.");
+      }
+      if (cleanCpfDigits && existingLocal.some(u => u.cpf && u.cpf === cleanCpfDigits)) {
+        throw new Error("Este CPF já está cadastrado em outra conta offline.");
+      }
     }
 
-    // Check if CPF or Email is already registered in Firestore if online
+    // Check if CPF is already registered in Firestore if online
     if (isOnline) {
       try {
         if (cleanCpfDigits) {
@@ -626,9 +699,29 @@ export function useShoppingData() {
     // 2. Online Registration
     if (isOnline) {
       try {
-        const userCredential = await createUserWithEmailAndPassword(auth, cleanedEmail, password);
-        const finalUid = userCredential.user.uid;
-        await updateProfile(userCredential.user, { displayName: cleanedName });
+        let finalUid: string;
+        let activeFirebaseUser: any = null;
+
+        try {
+          const userCredential = await createUserWithEmailAndPassword(auth, cleanedEmail, password);
+          finalUid = userCredential.user.uid;
+          activeFirebaseUser = userCredential.user;
+          await updateProfile(userCredential.user, { displayName: cleanedName });
+        } catch (authErr: any) {
+          if (authErr.code === 'auth/email-already-in-use') {
+            // Self-healing: If user exists in Firebase Authentication (e.g. database was wiped), try logging in with the provided password!
+            try {
+              const loginCredential = await signInWithEmailAndPassword(auth, cleanedEmail, password);
+              finalUid = loginCredential.user.uid;
+              activeFirebaseUser = loginCredential.user;
+              await updateProfile(loginCredential.user, { displayName: cleanedName });
+            } catch (loginErr: any) {
+              throw new Error("Este endereço de e-mail já possui cadastro no Firebase Authentication. Faça login na aba 'Fazer login' com sua senha ou recupere seu acesso.");
+            }
+          } else {
+            throw authErr;
+          }
+        }
         
         const finalProfile: UserProfile = {
           id: finalUid,
@@ -643,13 +736,13 @@ export function useShoppingData() {
           finalProfile.cpf = cleanCpfDigits;
         }
         
-        await setDoc(doc(db, 'users', finalUid), finalProfile, { merge: true });
+        await setDoc(doc(db, 'users', finalUid), cleanPayload(finalProfile), { merge: true });
         
-        // Seed the 9 default categories in Firestore with matching deterministic IDs
+        // Seed the 9 default categories in user's subcollection /users/{finalUid}/categories
         const defaultCats = DEFAULT_CATEGORIES(finalUid);
         const batch = writeBatch(db);
         defaultCats.forEach((cat) => {
-          const catRef = doc(db, 'categories', cat.id);
+          const catRef = doc(db, 'users', finalUid, 'categories', cat.id);
           batch.set(catRef, {
             ...cat,
             id: cat.id,
@@ -674,15 +767,12 @@ export function useShoppingData() {
         }));
 
         // Update active user state
-        setUser(userCredential.user);
+        setUser(activeFirebaseUser);
         setUserProfile(finalProfile);
         setCategories(defaultCats);
         setThemeColor('#0284c7');
         setupUserDataListeners(finalUid, cleanedName, cleanedEmail);
       } catch (err: any) {
-        if (err.code === 'auth/email-already-in-use') {
-          throw new Error("Este endereço de e-mail já está cadastrado.");
-        }
         if (err.code === 'auth/weak-password') {
           throw new Error("A senha informada é muito fraca. Utilize no mínimo 6 caracteres.");
         }
@@ -1002,8 +1092,9 @@ export function useShoppingData() {
         const userDocRef = doc(db, 'users', firebaseUser.uid);
         const docSnap = await getDoc(userDocRef);
         const nowIso = new Date().toISOString();
+        const localUser = getLocalUsers().find(u => u.id === firebaseUser.uid || (firebaseUser.email && u.email?.toLowerCase() === firebaseUser.email.toLowerCase()));
+
         if (!docSnap.exists()) {
-          const localUser = getLocalUsers().find(u => u.id === firebaseUser.uid || (firebaseUser.email && u.email?.toLowerCase() === firebaseUser.email.toLowerCase()));
           const newProfile: UserProfile = {
             id: firebaseUser.uid,
             name: firebaseUser.displayName || localUser?.name || 'Usuário Google',
@@ -1019,13 +1110,28 @@ export function useShoppingData() {
           const defaultCats = DEFAULT_CATEGORIES(firebaseUser.uid);
           const batch = writeBatch(db);
           defaultCats.forEach(cat => {
-            const catRef = doc(db, 'categories', cat.id);
+            const catRef = doc(db, 'users', firebaseUser.uid, 'categories', cat.id);
             batch.set(catRef, { ...cat, id: cat.id, userId: firebaseUser.uid, createdAt: nowIso, updatedAt: nowIso });
           });
           await batch.commit();
+
+          setUserProfile(newProfile);
+          saveUserData('user_profile', newProfile, firebaseUser.uid);
+        } else {
+          const existingData = docSnap.data() as UserProfile;
+          const mergedProfile: UserProfile = {
+            ...existingData,
+            name: existingData.name || firebaseUser.displayName || 'Usuário Google',
+            email: existingData.email || firebaseUser.email || '',
+            photoURL: existingData.photoURL || firebaseUser.photoURL || undefined,
+            updatedAt: nowIso
+          };
+          await setDoc(userDocRef, cleanPayload(mergedProfile), { merge: true });
+          setUserProfile(mergedProfile);
+          saveUserData('user_profile', mergedProfile, firebaseUser.uid);
         }
       } catch (googleSyncErr) {
-        console.warn("Google user Firestore init error:", googleSyncErr);
+        console.error("Google user Firestore init error:", googleSyncErr);
       }
     } catch (error) {
       console.error("Erro ao autenticar com Google:", error);
@@ -1332,11 +1438,11 @@ export function useShoppingData() {
       try {
         const batch = writeBatch(db);
         defaultCats.forEach((cat) => {
-          const ref = doc(db, 'categories', cat.id);
+          const ref = doc(db, 'users', uid, 'categories', cat.id);
           batch.set(ref, cat);
         });
         defaultProds.forEach((prod) => {
-          const ref = doc(db, 'products', prod.id);
+          const ref = doc(db, 'users', uid, 'products', prod.id);
           batch.set(ref, prod);
         });
         await batch.commit();
@@ -1368,26 +1474,26 @@ export function useShoppingData() {
 
       const batch = writeBatch(db);
 
-      // Upload local categories
+      // Upload local categories to users/{uid}/categories
       localCats.forEach((cat: Category) => {
-        const ref = doc(db, 'categories', cat.id);
+        const ref = doc(db, 'users', uid, 'categories', cat.id);
         batch.set(ref, { ...cat, userId: uid });
       });
 
-      // Upload local products
+      // Upload local products to users/{uid}/products
       localProds.forEach((prod: Product) => {
-        const ref = doc(db, 'products', prod.id);
+        const ref = doc(db, 'users', uid, 'products', prod.id);
         batch.set(ref, { ...prod, userId: uid });
       });
 
-      // Upload local purchases
+      // Upload local purchases to users/{uid}/purchases
       localPurchases.forEach((pur: Purchase) => {
-        const ref = doc(db, 'purchases', pur.id);
+        const ref = doc(db, 'users', uid, 'purchases', pur.id);
         batch.set(ref, { ...pur, userId: uid });
 
         const itemsList = localItems[pur.id] || [];
         itemsList.forEach((item: PurchaseItem) => {
-          const itemRef = doc(db, 'purchases', pur.id, 'items', item.id);
+          const itemRef = doc(db, 'users', uid, 'purchases', pur.id, 'items', item.id);
           batch.set(itemRef, item);
         });
       });
@@ -1417,11 +1523,11 @@ export function useShoppingData() {
       localStorage.removeItem(`feira_user_${currentUid}_purchases`);
       localStorage.removeItem(`feira_user_${currentUid}_purchase_items`);
 
-      // 2. If online and real Firebase account, delete Firestore collections
+      // 2. If online and real Firebase account, delete Firestore user subcollections
       if (user && !('isOffline' in user) && isOnline) {
-        const catSnap = await getDocs(query(collection(db, 'categories'), where('userId', '==', currentUid)));
-        const prodSnap = await getDocs(query(collection(db, 'products'), where('userId', '==', currentUid)));
-        const purSnap = await getDocs(query(collection(db, 'purchases'), where('userId', '==', currentUid)));
+        const catSnap = await getDocs(collection(db, 'users', currentUid, 'categories'));
+        const prodSnap = await getDocs(collection(db, 'users', currentUid, 'products'));
+        const purSnap = await getDocs(collection(db, 'users', currentUid, 'purchases'));
 
         const batch = writeBatch(db);
         catSnap.forEach(d => batch.delete(d.ref));
@@ -1429,7 +1535,7 @@ export function useShoppingData() {
         
         for (const pDoc of purSnap.docs) {
           try {
-            const itemsSnap = await getDocs(collection(db, 'purchases', pDoc.id, 'items'));
+            const itemsSnap = await getDocs(collection(db, 'users', currentUid, 'purchases', pDoc.id, 'items'));
             itemsSnap.forEach(iDoc => batch.delete(iDoc.ref));
           } catch (itemErr) {
             console.warn("Error deleting subcollection items for", pDoc.id, itemErr);
@@ -1464,16 +1570,16 @@ export function useShoppingData() {
       try {
         const batch = writeBatch(db);
         newCats.forEach(cat => {
-          batch.set(doc(db, 'categories', cat.id), { ...cat, userId: uid });
+          batch.set(doc(db, 'users', uid, 'categories', cat.id), { ...cat, userId: uid });
         });
         newProds.forEach(prod => {
-          batch.set(doc(db, 'products', prod.id), { ...prod, userId: uid });
+          batch.set(doc(db, 'users', uid, 'products', prod.id), { ...prod, userId: uid });
         });
         newPurs.forEach(pur => {
-          batch.set(doc(db, 'purchases', pur.id), { ...pur, userId: uid });
+          batch.set(doc(db, 'users', uid, 'purchases', pur.id), { ...pur, userId: uid });
           const items = newItems[pur.id] || [];
           items.forEach(item => {
-            batch.set(doc(db, 'purchases', pur.id, 'items', item.id), item);
+            batch.set(doc(db, 'users', uid, 'purchases', pur.id, 'items', item.id), item);
           });
         });
         await batch.commit();
@@ -1534,7 +1640,7 @@ export function useShoppingData() {
     };
 
     if (user && !('isOffline' in user)) {
-      await setDoc(doc(db, 'categories', newCat.id), newCat);
+      await setDoc(doc(db, 'users', uid, 'categories', newCat.id), newCat);
     } else {
       const updated = [...categories, newCat];
       setCategories(updated);
@@ -1561,8 +1667,9 @@ export function useShoppingData() {
       throw new Error("Selecione um ícone para identificar a categoria.");
     }
 
+    const uid = user ? user.uid : 'guest';
     if (user && !('isOffline' in user)) {
-      await updateDoc(doc(db, 'categories', id), {
+      await updateDoc(doc(db, 'users', uid, 'categories', id), {
         name: cleanedName,
         iconName,
         updatedAt: new Date().toISOString()
@@ -1583,8 +1690,9 @@ export function useShoppingData() {
       throw new Error(`Não é permitido excluir esta categoria pois ela possui ${linkedProducts.length} produto(s) associado(s). Remova ou reatribua os produtos antes.`);
     }
 
+    const uid = user ? user.uid : 'guest';
     if (user && !('isOffline' in user)) {
-      await deleteDoc(doc(db, 'categories', id));
+      await deleteDoc(doc(db, 'users', uid, 'categories', id));
     } else {
       const updated = categories.filter(cat => cat.id !== id);
       setCategories(updated);
@@ -1657,7 +1765,7 @@ export function useShoppingData() {
     };
 
     if (user && !('isOffline' in user)) {
-      await setDoc(doc(db, 'products', newProd.id), newProd);
+      await setDoc(doc(db, 'users', uid, 'products', newProd.id), newProd);
     } else {
       const updated = [...products, newProd];
       setProducts(updated);
@@ -1715,8 +1823,9 @@ export function useShoppingData() {
       ...(cleanedBarcode !== undefined ? { barcode: cleanedBarcode } : {}),
     };
 
+    const uid = user ? user.uid : 'guest';
     if (user && !('isOffline' in user)) {
-      await updateDoc(doc(db, 'products', id), {
+      await updateDoc(doc(db, 'users', uid, 'products', id), {
         ...finalData,
         updatedAt: new Date().toISOString()
       });
@@ -1738,8 +1847,9 @@ export function useShoppingData() {
       throw new Error("Não é possível excluir este produto pois ele já está sendo utilizado em uma lista/feira.");
     }
 
+    const uid = user ? user.uid : 'guest';
     if (user && !('isOffline' in user)) {
-      await deleteDoc(doc(db, 'products', id));
+      await deleteDoc(doc(db, 'users', uid, 'products', id));
     } else {
       const updated = products.filter(prod => prod.id !== id);
       setProducts(updated);
@@ -1829,9 +1939,9 @@ export function useShoppingData() {
 
     if (user && !('isOffline' in user)) {
       const batch = writeBatch(db);
-      batch.set(doc(db, 'purchases', newPur.id), newPur);
+      batch.set(doc(db, 'users', uid, 'purchases', newPur.id), newPur);
       initialItems.forEach((item) => {
-        batch.set(doc(db, 'purchases', newPur.id, 'items', item.id), item);
+        batch.set(doc(db, 'users', uid, 'purchases', newPur.id, 'items', item.id), item);
       });
       await batch.commit();
 
@@ -1885,8 +1995,9 @@ export function useShoppingData() {
       updatedAt: new Date().toISOString()
     };
 
+    const uid = user ? user.uid : 'guest';
     if (user && !('isOffline' in user)) {
-      await updateDoc(doc(db, 'purchases', id), finalData);
+      await updateDoc(doc(db, 'users', uid, 'purchases', id), finalData);
     } else {
       const updated = purchases.map(pur => pur.id === id ? {
         ...pur, ...finalData
@@ -1902,19 +2013,20 @@ export function useShoppingData() {
       throw new Error("Listas de compras com status 'Finalizada' não podem ser excluídas.");
     }
 
+    const uid = user ? user.uid : 'guest';
     if (user && !('isOffline' in user)) {
       // Cascade delete items in subcollection
       try {
-        const itemsSnap = await getDocs(collection(db, 'purchases', id, 'items'));
+        const itemsSnap = await getDocs(collection(db, 'users', uid, 'purchases', id, 'items'));
         const batch = writeBatch(db);
         itemsSnap.forEach(itemDoc => {
           batch.delete(itemDoc.ref);
         });
-        batch.delete(doc(db, 'purchases', id));
+        batch.delete(doc(db, 'users', uid, 'purchases', id));
         await batch.commit();
       } catch (err) {
         console.error("Erro ao deletar compra em cascata:", err);
-        await deleteDoc(doc(db, 'purchases', id));
+        await deleteDoc(doc(db, 'users', uid, 'purchases', id));
       }
     } else {
       const updated = purchases.filter(pur => pur.id !== id);
@@ -1973,9 +2085,9 @@ export function useShoppingData() {
 
     if (user && !('isOffline' in user)) {
       const batch = writeBatch(db);
-      batch.set(doc(db, 'purchases', newPur.id), newPur);
+      batch.set(doc(db, 'users', uid, 'purchases', newPur.id), newPur);
       clonedItems.forEach(item => {
-        batch.set(doc(db, 'purchases', newPur.id, 'items', item.id), item);
+        batch.set(doc(db, 'users', uid, 'purchases', newPur.id, 'items', item.id), item);
       });
       await batch.commit();
 
@@ -2030,15 +2142,16 @@ export function useShoppingData() {
       isChecked: false
     };
 
+    const uid = user ? user.uid : 'guest';
     if (user && !('isOffline' in user)) {
-      await setDoc(doc(db, 'purchases', purchaseId, 'items', newItem.id), newItem);
+      await setDoc(doc(db, 'users', uid, 'purchases', purchaseId, 'items', newItem.id), newItem);
       
       const currentPur = purchases.find(p => p.id === purchaseId);
       if (currentPur) {
         const currentList = purchaseItems[purchaseId] || [];
         const updatedList = [...currentList, newItem];
         const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-        await updateDoc(doc(db, 'purchases', purchaseId), {
+        await updateDoc(doc(db, 'users', uid, 'purchases', purchaseId), {
           total: Number(newTotal.toFixed(2)),
           updatedAt: new Date().toISOString()
         });
@@ -2069,13 +2182,14 @@ export function useShoppingData() {
       throw new Error("O preço unitário não pode ser negativo.");
     }
 
+    const uid = user ? user.uid : 'guest';
     if (user && !('isOffline' in user)) {
-      await updateDoc(doc(db, 'purchases', purchaseId, 'items', itemId), data);
+      await updateDoc(doc(db, 'users', uid, 'purchases', purchaseId, 'items', itemId), data);
       
       const itemsList = purchaseItems[purchaseId] || [];
       const updatedList = itemsList.map(item => item.id === itemId ? { ...item, ...data } : item);
       const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-      await updateDoc(doc(db, 'purchases', purchaseId), {
+      await updateDoc(doc(db, 'users', uid, 'purchases', purchaseId), {
         total: Number(newTotal.toFixed(2)),
         updatedAt: new Date().toISOString()
       });
@@ -2098,13 +2212,14 @@ export function useShoppingData() {
   };
 
   const deletePurchaseItem = async (purchaseId: string, itemId: string) => {
+    const uid = user ? user.uid : 'guest';
     if (user && !('isOffline' in user)) {
-      await deleteDoc(doc(db, 'purchases', purchaseId, 'items', itemId));
+      await deleteDoc(doc(db, 'users', uid, 'purchases', purchaseId, 'items', itemId));
       
       const itemsList = purchaseItems[purchaseId] || [];
       const updatedList = itemsList.filter(item => item.id !== itemId);
       const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-      await updateDoc(doc(db, 'purchases', purchaseId), {
+      await updateDoc(doc(db, 'users', uid, 'purchases', purchaseId), {
         total: Number(newTotal.toFixed(2)),
         updatedAt: new Date().toISOString()
       });
@@ -2134,10 +2249,11 @@ export function useShoppingData() {
     const list = purchaseItems[purchaseId] || [];
     if (list.length === 0) return;
 
+    const uid = user ? user.uid : 'guest';
     if (user && !('isOffline' in user)) {
       const batch = writeBatch(db);
       list.forEach(item => {
-        batch.update(doc(db, 'purchases', purchaseId, 'items', item.id), { isChecked });
+        batch.update(doc(db, 'users', uid, 'purchases', purchaseId, 'items', item.id), { isChecked });
       });
       await batch.commit();
     } else {
@@ -2168,6 +2284,22 @@ export function useShoppingData() {
     await updatePurchase(purchaseId, { status: 'inProgress' });
   };
 
+  // Completely wipe local storage and cached browser session
+  const clearLocalStorage = useCallback(() => {
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+      setUser(null);
+      setUserProfile(null);
+      setCategories(DEFAULT_CATEGORIES('guest'));
+      setProducts([]);
+      setPurchases([]);
+      setPurchaseItems({});
+    } catch (err) {
+      console.warn("Erro ao limpar armazenamento local:", err);
+    }
+  }, []);
+
   return {
     user,
     loading,
@@ -2186,6 +2318,7 @@ export function useShoppingData() {
     seedDefaults,
     syncGuestDataToAccount,
     clearAllData,
+    clearLocalStorage,
     importBackup,
     
     // Auth Core & Profile Methods

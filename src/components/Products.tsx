@@ -7,6 +7,7 @@ import { Category, Product, Purchase, PurchaseItem } from '../types';
 import { CategoryIcon, AVAILABLE_ICONS } from './CategoryIcon';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { sanitizeAndCapitalize, formatMoneyInput, parseMoneyToNumber, formatCurrencyBRL } from '../utils/textFormatters';
+import { PRODUCT_UNITS, normalizeProductUnit, getUnitCardDisplay } from '../utils/units';
 
 interface ProductsProps {
   categories: Category[];
@@ -121,7 +122,7 @@ export function Products({
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [prodName, setProdName] = useState('');
   const [prodCategoryId, setProdCategoryId] = useState('');
-  const [prodUnit, setProdUnit] = useState('Un');
+  const [prodUnit, setProdUnit] = useState('Unidade');
   const [prodBrand, setProdBrand] = useState('');
   const [prodBarcode, setProdBarcode] = useState('');
   const [prodLastPrice, setProdLastPrice] = useState('0,00');
@@ -211,7 +212,7 @@ export function Products({
     setEditingProductId(prod.id);
     setProdName(prod.name);
     setProdCategoryId(prod.categoryId);
-    setProdUnit(prod.unit);
+    setProdUnit(normalizeProductUnit(prod.unit));
     setProdBrand(prod.brand || '');
     setProdBarcode(prod.barcode || '');
     setProdLastPrice(formatMoneyInput(prod.lastPrice || 0));
@@ -243,7 +244,7 @@ export function Products({
     setProdBarcode(data.barcode);
     if (data.suggestedName) setProdName(sanitizeAndCapitalize(data.suggestedName, 40));
     if (data.suggestedBrand) setProdBrand(sanitizeAndCapitalize(data.suggestedBrand, 40));
-    if (data.suggestedUnit) setProdUnit(data.suggestedUnit);
+    if (data.suggestedUnit) setProdUnit(normalizeProductUnit(data.suggestedUnit));
 
     // Match category
     if (data.suggestedCategory && categories.length > 0) {
@@ -683,13 +684,13 @@ export function Products({
                 <div>
                   <label className="block text-xs font-bold text-neutral-500 mb-1">Unidade de medida *</label>
                   <select
-                    value={prodUnit}
+                    value={normalizeProductUnit(prodUnit)}
                     onChange={(e) => setProdUnit(e.target.value)}
                     className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 overflow-y-auto max-h-48 cursor-pointer"
                   >
-                    {['Bandeja', 'Caixa', 'Garrafa', 'Grama', 'Kg', 'Lata', 'Litros', 'Pacote', 'Pote', 'Saco', 'Unidade (un)'].map((u) => (
-                      <option key={u} value={u}>
-                        {u}
+                    {PRODUCT_UNITS.map((u) => (
+                      <option key={u.value} value={u.value}>
+                        {u.label}
                       </option>
                     ))}
                   </select>
@@ -794,7 +795,7 @@ export function Products({
                           {cat ? <CategoryIcon name={cat.iconName} size={12} /> : null}
                           {cat ? cat.name : 'Outros'}
                         </span>
-                        <span className="text-[10px] bg-neutral-100 text-neutral-500 px-1.5 py-0.5 rounded font-bold uppercase">{prod.unit}</span>
+                        <span className="text-[10px] bg-neutral-100 text-neutral-600 px-2 py-0.5 rounded font-bold">{getUnitCardDisplay(prod.unit)}</span>
                         {prod.barcode && (
                           <span className="text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200/50 px-1.5 py-0.5 rounded font-semibold flex items-center gap-1" title={`Código de Barras: ${prod.barcode}`}>
                             <BarcodeIcon size={10} />

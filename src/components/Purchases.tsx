@@ -10,6 +10,7 @@ import { Purchase, PurchaseType, PurchaseItem, Product, Category, PURCHASE_TYPE_
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { ReceiptOcrModal, OcrExtractedItem } from './ReceiptOcrModal';
 import { sanitizeAndCapitalize, formatMoneyInput, parseMoneyToNumber, formatCurrencyBRL } from '../utils/textFormatters';
+import { PRODUCT_UNITS, normalizeProductUnit, getUnitCardDisplay } from '../utils/units';
 
 interface PurchasesProps {
   purchases: Purchase[];
@@ -29,6 +30,8 @@ interface PurchasesProps {
   reopenPurchase: (purchaseId: string) => Promise<void>;
   selectedPurchaseIdFromHome?: string | null;
   onClearSelectedPurchaseId?: () => void;
+  activePurchaseId?: string | null;
+  onSelectPurchase?: (id: string | null) => void;
   addProduct: (name: string, categoryId: string, unit: string, brand: string, lastPrice: number, barcode?: string) => Promise<Product>;
 }
 
@@ -50,9 +53,32 @@ export function Purchases({
   reopenPurchase,
   selectedPurchaseIdFromHome,
   onClearSelectedPurchaseId,
+  activePurchaseId,
+  onSelectPurchase,
   addProduct
 }: PurchasesProps) {
-  const [selectedPurchaseId, setSelectedPurchaseId] = useState<string | null>(null);
+  const [internalPurchaseId, setInternalPurchaseId] = useState<string | null>(
+    activePurchaseId ?? selectedPurchaseIdFromHome ?? null
+  );
+
+  const selectedPurchaseId = activePurchaseId !== undefined ? activePurchaseId : internalPurchaseId;
+
+  const setSelectedPurchaseId = (id: string | null) => {
+    setInternalPurchaseId(id);
+    if (onSelectPurchase) {
+      onSelectPurchase(id);
+    }
+  };
+
+  // If the active purchase was deleted or doesn't exist anymore in the list, safely reset
+  useEffect(() => {
+    if (selectedPurchaseId && purchases.length > 0) {
+      const exists = purchases.some((p) => p.id === selectedPurchaseId);
+      if (!exists) {
+        setSelectedPurchaseId(null);
+      }
+    }
+  }, [selectedPurchaseId, purchases]);
 
   // Active purchase kebab menu state
   const [isKebabOpen, setIsKebabOpen] = useState(false);
@@ -530,7 +556,7 @@ export function Purchases({
       const createdProd = await addProduct(
         cleanedName,
         newProdCatId,
-        newProdUnit,
+        normalizeProductUnit(newProdUnit),
         cleanedBrand,
         priceNum,
         newProdBarcode.trim() || undefined
@@ -724,7 +750,7 @@ export function Purchases({
 
     const prodName = data.suggestedName || `Produto ${data.barcode}`;
     const prodBrand = data.suggestedBrand || '';
-    const prodUnit = data.suggestedUnit || 'Un';
+    const prodUnit = normalizeProductUnit(data.suggestedUnit || 'Un');
 
     try {
       const createdProd = await addProduct(
@@ -1680,7 +1706,7 @@ export function Purchases({
                             type="button"
                             onClick={() => {
                               setSelectedProductId(p.id);
-                              setProductSearchTerm(`${p.name}${p.brand ? ` (${p.brand})` : ''} - ${p.unit}`);
+                              setProductSearchTerm(`${p.name}${p.brand ? ` (${p.brand})` : ''} - ${getUnitCardDisplay(p.unit)}`);
                               setItemPrice(formatMoneyInput(p.lastPrice || 0));
                               setItemBrand(p.brand || '');
                               setIsProductDropdownOpen(false);
@@ -1692,7 +1718,7 @@ export function Purchases({
                             <div>
                               <div className="text-xs font-bold text-neutral-900">{p.name}</div>
                               <div className="text-[10px] text-neutral-400">
-                                {p.brand ? `Marca: ${p.brand} • ` : ''}Unidade: {p.unit}
+                                {p.brand ? `Marca: ${p.brand} • ` : ''}Unidade: {getUnitCardDisplay(p.unit)}
                               </div>
                             </div>
                             <div className="text-right shrink-0">
@@ -2159,21 +2185,15 @@ export function Purchases({
                   </label>
                   <select
                     required
-                    value={newProdUnit}
+                    value={normalizeProductUnit(newProdUnit)}
                     onChange={(e) => setNewProdUnit(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 overflow-y-auto max-h-48 cursor-pointer"
                   >
-                    <option value="Unidade">Unidade (un)</option>
-                    <option value="Kg">Quilograma (kg)</option>
-                    <option value="Grama">Grama (g)</option>
-                    <option value="Litros">Litros (l)</option>
-                    <option value="Pacote">Pacote (pct)</option>
-                    <option value="Caixa">Caixa (cx)</option>
-                    <option value="Lata">Lata</option>
-                    <option value="Garrafa">Garrafa</option>
-                    <option value="Bandeja">Bandeja</option>
-                    <option value="Pote">Pote</option>
-                    <option value="Saco">Saco</option>
+                    {PRODUCT_UNITS.map((u) => (
+                      <option key={u.value} value={u.value}>
+                        {u.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -2565,7 +2585,7 @@ export function Purchases({
                 <span className="text-neutral-600 font-medium">Marca: {item.productBrand}</span>
               )}
               <span>•</span>
-              <span>Unidade: {item.unit}</span>
+              <span>Unidade: {getUnitCardDisplay(item.unit)}</span>
 
               {/* Price comparison badge vs catalog previous price (RN-ITE-006) */}
               {(() => {
