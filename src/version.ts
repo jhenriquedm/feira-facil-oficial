@@ -14,14 +14,24 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.4.4',
-  buildNumber: 54,
+  version: '1.4.5',
+  buildNumber: 55,
   releaseDate: '2026-09-24',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.4.5',
+      date: '2026-09-24',
+      highlights: [
+        'Consulta online direta multi-bases (Open Food Facts Brasil, Open Beauty, Open Products) com CORS aberto e resposta em tempo real',
+        'Eliminação da dependência de proxy de nuvem para consultas de códigos de barra no APK Android',
+        'Expansão da base offline pré-carregada com cafés e marcas populares brasileiras (3 Corações, Santa Clara, Melitta, Pilão)',
+        'Gravação automática instantânea na memória do dispositivo para qualquer produto identificado na nuvem ou cadastrado'
+      ]
+    },
     {
       version: '1.4.4',
       date: '2026-09-24',

@@ -164,6 +164,109 @@ export function getOfflineDatabaseStats(): {
 }
 
 /**
+ * Queries public open barcode databases directly from the client (Open Food Facts, Open Beauty Facts, Open Products Facts)
+ * as well as backend server endpoint fallback.
+ */
+async function fetchOnlineBarcodeDirect(code: string): Promise<OfflineCatalogProduct | null> {
+  const sources = [
+    { url: `https://world.openfoodfacts.org/api/v2/product/${code}.json`, defaultCat: 'Mercearia' },
+    { url: `https://br.openfoodfacts.org/api/v2/product/${code}.json`, defaultCat: 'Mercearia' },
+    { url: `https://world.openbeautyfacts.org/api/v2/product/${code}.json`, defaultCat: 'Higiene' },
+    { url: `https://world.openproductsfacts.org/api/v2/product/${code}.json`, defaultCat: 'Limpeza' }
+  ];
+
+  for (const src of sources) {
+    try {
+      const res = await fetch(src.url, {
+        headers: { 'User-Agent': 'FeiraFacil/1.4 (Android Mobile App)' },
+        signal: AbortSignal.timeout(3500)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.status === 1 && json.product) {
+          const p = json.product;
+          const name = (p.product_name_pt || p.product_name || p.generic_name_pt || p.generic_name || '').trim();
+          if (name && name.length >= 2) {
+            const rawBrand = (p.brands || p.brand_owner || '').split(',')[0].trim();
+            const brand = normalizeBrand(rawBrand);
+
+            const catHierarchy = `${(p.categories_tags || []).join(' ')} ${name} ${rawBrand}`.toLowerCase();
+            let category = src.defaultCat;
+            let unit = 'Unidade';
+
+            if (catHierarchy.includes('beverage') || catHierarchy.includes('bebida') || catHierarchy.includes('suco') || catHierarchy.includes('refrigerante') || catHierarchy.includes('cerveja') || catHierarchy.includes('água') || catHierarchy.includes('vinho')) {
+              category = 'Bebidas';
+              unit = 'Unidade';
+            } else if (catHierarchy.includes('carne') || catHierarchy.includes('açougue') || catHierarchy.includes('acougue') || catHierarchy.includes('frango') || catHierarchy.includes('peixe') || catHierarchy.includes('bovino') || catHierarchy.includes('suíno')) {
+              category = 'Açougue';
+              unit = 'Kg';
+            } else if (catHierarchy.includes('fruta') || catHierarchy.includes('verdura') || catHierarchy.includes('legume') || catHierarchy.includes('hortifruti') || catHierarchy.includes('vegetable')) {
+              category = 'Hortifruti';
+              unit = 'Kg';
+            } else if (catHierarchy.includes('limpeza') || catHierarchy.includes('deterg') || catHierarchy.includes('sabao') || catHierarchy.includes('sabão') || catHierarchy.includes('desinfetante') || catHierarchy.includes('amaciante') || catHierarchy.includes('alvejante')) {
+              category = 'Limpeza';
+              unit = 'Unidade';
+            } else if (catHierarchy.includes('dairy') || catHierarchy.includes('leite') || catHierarchy.includes('queijo') || catHierarchy.includes('iogurte') || catHierarchy.includes('manteiga') || catHierarchy.includes('requeij')) {
+              category = 'Laticínios';
+              unit = 'Unidade';
+            } else if (catHierarchy.includes('pão') || catHierarchy.includes('pao') || catHierarchy.includes('padaria') || catHierarchy.includes('biscoito') || catHierarchy.includes('bolacha') || catHierarchy.includes('bolo') || catHierarchy.includes('torrada')) {
+              category = 'Padaria';
+              unit = 'Pacote';
+            } else if (catHierarchy.includes('higiene') || catHierarchy.includes('shampoo') || catHierarchy.includes('sabonete') || catHierarchy.includes('dental') || catHierarchy.includes('desodorante') || catHierarchy.includes('cosmetic')) {
+              category = 'Higiene';
+              unit = 'Unidade';
+            } else if (catHierarchy.includes('farmácia') || catHierarchy.includes('farmacia') || catHierarchy.includes('medicamento') || catHierarchy.includes('remedio') || catHierarchy.includes('remédio') || catHierarchy.includes('comprimido')) {
+              category = 'Farmácia';
+              unit = 'Caixa';
+            }
+
+            if (p.quantity) {
+              const q = String(p.quantity).toLowerCase();
+              if (q.includes('kg') || q.includes('quilo')) unit = 'Kg';
+              else if (q.includes('g') && !q.includes('kg')) unit = 'Grama';
+              else if (q.includes('l') || q.includes('litro')) unit = 'Litros';
+            }
+
+            return {
+              barcode: code,
+              name,
+              brand,
+              category,
+              unit: normalizeProductUnit(unit)
+            };
+          }
+        }
+      }
+    } catch {
+      // Continue to next provider
+    }
+  }
+
+  // Fallback to backend /api/barcode/lookup if available
+  try {
+    const res = await fetch(getApiUrl(`/api/barcode/lookup?code=${encodeURIComponent(code)}`), {
+      signal: AbortSignal.timeout(3500)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.found && data.name) {
+        return {
+          barcode: code,
+          name: data.name.trim(),
+          brand: normalizeBrand(data.brand),
+          category: data.categorySuggestion || 'Mercearia',
+          unit: normalizeProductUnit(data.unit)
+        };
+      }
+    }
+  } catch {
+    // Ignore backend proxy failure
+  }
+
+  return null;
+}
+
+/**
  * Main 3-step hierarchy barcode lookup as requested:
  * 
  * 1. Já existe no catálogo pessoal do usuário?
@@ -248,38 +351,27 @@ export async function lookupBarcodeWithHierarchy(
     };
   }
 
-  // STEP 3: Online API lookup fallback (if connection is available)
+  // STEP 3: Online API lookup (Direct Open Food Facts / Beauty / Products + Backend Fallback)
   const isOnline = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
   if (isOnline) {
     try {
-      const res = await fetch(getApiUrl(`/api/barcode/lookup?code=${encodeURIComponent(clean)}`));
-      if (res.ok) {
-        const data = await res.json();
-        if (data.found && data.name) {
-          const finalProduct: OfflineCatalogProduct = {
-            barcode: clean,
-            name: data.name,
-            brand: normalizeBrand(data.brand),
-            category: data.categorySuggestion || 'Mercearia',
-            unit: normalizeProductUnit(data.unit)
-          };
+      const onlineProduct = await fetchOnlineBarcodeDirect(clean);
+      if (onlineProduct && onlineProduct.name) {
+        // Save into local device memory so next time it is instant offline!
+        learnBarcode(onlineProduct);
 
-          // Save into local device memory so next time it is instant offline!
-          learnBarcode(finalProduct);
-
-          return {
-            barcode: clean,
-            found: true,
-            name: finalProduct.name,
-            brand: finalProduct.brand,
-            category: finalProduct.category,
-            unit: finalProduct.unit,
-            source: 'online_api',
-            sourceBadge: data.databaseSource || 'Open Food Facts (Nuvem)',
-            sourceDescription: 'Localizado na nuvem e salvo na memória do seu aparelho para uso offline futuro.',
-            isUserCatalogProduct: false
-          };
-        }
+        return {
+          barcode: clean,
+          found: true,
+          name: onlineProduct.name,
+          brand: onlineProduct.brand,
+          category: onlineProduct.category,
+          unit: onlineProduct.unit,
+          source: 'online_api',
+          sourceBadge: 'Open Food Facts (Nuvem)',
+          sourceDescription: 'Localizado na nuvem e salvo na memória do seu aparelho para uso offline futuro.',
+          isUserCatalogProduct: false
+        };
       }
     } catch (e) {
       console.warn('Consulta online indisponível:', e);
