@@ -14,14 +14,24 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.4.5',
-  buildNumber: 55,
+  version: '1.4.6',
+  buildNumber: 56,
   releaseDate: '2026-09-24',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.4.6',
+      date: '2026-09-24',
+      highlights: [
+        'Revisão e higienização completa da base offline de mais de 11.100 itens com validação matemática estrita de dígitos verificadores GS1 / EAN-13',
+        'Eliminação de todos os códigos de barras obsoletos ou sintéticos fora de padrão comercial',
+        'Atualização e inclusão dos GTINs ativos mais recentes das marcas líderes no Brasil (3 Corações, Santa Clara, Melitta, Ypê, Omo, Camil, Tio João, Piracanjuba, Sadia, Seara, Coca-Cola)',
+        'Padronização de categorias e unidades de medida para sincronização instantânea em compras e estoque'
+      ]
+    },
     {
       version: '1.4.5',
       date: '2026-09-24',
