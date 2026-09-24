@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { AppLogo } from './AppLogo';
 import { sanitizeAndCapitalize, formatCPF, isValidCPF } from '../utils/textFormatters';
+import { APP_VERSION_INFO } from '../version';
 
 interface AuthGateProps {
   loginWithEmail: (identifier: string, password: string) => Promise<void>;
@@ -687,6 +688,13 @@ export function AuthGate({
             )}
           </div>
         )}
+
+        {/* App Version Info */}
+        <div className="mt-4 text-center">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-[11px] font-semibold text-sky-100 border border-white/15">
+            Feira Fácil • v{APP_VERSION_INFO.version} (Build {APP_VERSION_INFO.buildNumber})
+          </span>
+        </div>
       </div>
     </div>
   );

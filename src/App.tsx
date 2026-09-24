@@ -14,6 +14,7 @@ import { Profile } from './components/Profile';
 import { Settings } from './components/Settings';
 import { AuthGate } from './components/AuthGate';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { APP_VERSION_INFO } from './version';
 
 export default function App() {
   const data = useShoppingData();
@@ -267,6 +268,11 @@ export default function App() {
               <LogOut size={15} />
               <span>Sair da Conta</span>
             </button>
+            <div className="mt-3 text-center">
+              <span className="text-[10px] font-bold text-neutral-400">
+                Feira Fácil v{APP_VERSION_INFO.version} (Build {APP_VERSION_INFO.buildNumber})
+              </span>
+            </div>
           </div>
         </aside>
       </div>

@@ -14,14 +14,24 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.3.3',
-  buildNumber: 16,
-  releaseDate: '2026-09-23',
+  version: '1.3.4',
+  buildNumber: 21,
+  releaseDate: '2026-09-24',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.3.4',
+      date: '2026-09-24',
+      highlights: [
+        'Resolução de conflito de instalação Android: unificação e fixação definitiva da chave de assinatura (keystore)',
+        'Versionamento automático e contínuo no app e build a cada novo commit (v1.3.4)',
+        'Controles de câmera com zoom ajustável (1.0x - 2.5x), foco macro e lanterna para código de barras e cupom fiscal',
+        'Base de dados offline expandida com 11.123 itens nativos (alimentos, bebidas, limpeza, medicamentos e bazar)'
+      ]
+    },
     {
       version: '1.3.3',
       date: '2026-09-23',

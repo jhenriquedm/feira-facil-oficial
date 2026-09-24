@@ -1,50 +1,24 @@
 const fs = require('fs');
 const path = require('path');
-const forge = require('node-forge');
+const crypto = require('crypto');
 
 const keystorePath = path.join(__dirname, '..', 'android', 'app', 'debug.keystore');
 
+// Fixed permanent debug keystore (SHA1 certificate: dacd06a8920674e0f9b7c9ac36b369713b10a9b8)
+// Registered with Google Cloud / Firebase Auth and used across all Feira Fácil APK builds.
+const FIXED_KEYSTORE_B64 = 'MIIJUAIBAzCCCRYGCSqGSIb3DQEHAaCCCQcEggkDMIII/zCCA4cGCSqGSIb3DQEHAaCCA3gEggN0MIIDcDCCA2wGCyqGSIb3DQEMCgEDoIIDBTCCAwEGCiqGSIb3DQEJFgGgggLxBIIC7TCCAukwggHRoAMCAQICAQEwDQYJKoZIhvcNAQELBQAwNzEWMBQGA1UEAxMNQW5kcm9pZCBEZWJ1ZzEQMA4GA1UEChMHQW5kcm9pZDELMAkGA1UEBhMCVVMwIBcNMjAwMTAxMDAwMDAwWhgPMjA1MDAxMDEwMDAwMDBaMDcxFjAUBgNVBAMTDUFuZHJvaWQgRGVidWcxEDAOBgNVBAoTB0FuZHJvaWQxCzAJBgNVBAYTAlVTMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2L/Vr9vRC72BAGh0MUlnIm0esRSib25CIudpRcQBoOCAdlCue4WGFt4teS9qW7BmiznFN941MlqqpGjPkplPt1RwyZsaA+79XuI7lDjIgtZX67XPd/d2LVP1EAlUaaBT7P+MNSZpOkAk8dhFE9Yd1KjO0vqQNftOdpiTmQsrUo6n4skyLzUmgI+InM5D008BN7tEJWLvGUAiXQ9PL6dJgDMr2hPQcSei9fMLPeoE8hirIXx2eu+PdgKNy3g4gqnZ8n0w/W/LgdTq56xRQ8UL89Lo7SaLLhBiwgOFL/SPwhANeWYx2eQPL9JapreMLHO1uIfNCaVmf2r0lw5SjfsvGQIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQAdADxfhtHhHbBXrznKmcFru+4H1XyzB+gVfo1ddaBqYp4Em6GIY7iPq7ptUSr14Zb6fnHZVzjOW1SEN+/3O2o6SV3PW2p2i3q8aPepuQN2Y/+iC4djQDsHTOWclhFizjX7nF4mqTdqlyQxsllbMQ+WBYCdcE/BqSbp238pm2LitllIEoexzbboY0Cl1l4+gPfkK0lob5wA8D24FIPPFPwSKl/i+ZH60CHlIcIROE3e07uV0pxCmr2SIicL0mOQ9CuPeuPLuh0Thbi6xKy/2KafzN6USGHmvxDnkGQfxuD0XRtjOJ54LS+2rriVRHqdPolrosAOcNDLwHu+N2BBAqFYMVQwIwYJKoZIhvcNAQkVMRYEFNrNBqiSBnTg+bfJrDazaXE7EKm4MC0GCSqGSIb3DQEJFDEgHh4AYQBuAGQAcgBvAGkAZABkAGUAYgB1AGcAawBlAHkwggVwBgkqhkiG9w0BBwGgggVhBIIFXTCCBVkwggVVBgsqhkiG9w0BDAoBAqCCBO4wggTqMBwGCiqGSIb3DQEMAQMwDgQIsofQI43cKfsCAggABIIEyHpGF0IleueP6JEEp4hFfAQj22jgVbaLV/zaEG8PLcHrSWakU0vr8YB2zIIxcsawTraDzPJh9EPF1zg2fvo65z0pqHkq3Oprb/z66ZZM4XUyLL2VOxDCuq4HMd5RCp+bAb680uxAW0qKqL8V8gYiadVqdGP+rT8j1s1Gt8dElFxS/dkSBbvHdNoB+IEu6HvYckKpKznq6OC+yz/wswDNWYEcBAK3NyZubZMkO3PrW6EqJw2+Jie/io4EY/Je9Yh7kE+pAonEmWLtKWC2pAHnjh3cZ6kxF3GahM64ejy90pxk1gcu5L4bRJdHXIyhEGCXnAMRn3fhUZLecUiLczIxTP6leJkvc0s3FihhncCCXnDPYtTxaBbCGX3MBAPDjj+TdQFS7Rbu7KcJNkUPqWZ4K0JXnVnaWrY6e0sP7GxZTgvDAYSTM6bnVHBKMr07C1G1CcEoSKTnE2YAvjKq172p+IvR71YrBIc8f0Lf0JvEfPX0HCnjePPNnrLahe+e+x9R1Ig65hCZ/7V9DtrIxtifTE6tGJkjCMWYyOh6wzVJIDhKpLk988IPBWfYu7fHQwhsQt6wBAf3ELzoZR3CK+JtPqDxkfl5azb5rNIAIsdtR044Nvnxk0UHHooyi1btWcTXo5in6pbzuWSBFxAL7X7iZh+Ls3ZwGwYJKp5qjUf5f0MDZdcVXp5kCprtxEKSQTzDqKZ5DNRwAPMdWbxZ5O7+XpYl3npmudxHq5n0vo2kBHdAsoshqCUxH9xfrzSb6Mo+tHki9zkM+chvihOV+C+gBFZaX5lQ9V1d8VVCh5g10AXAPFCFPnTOkPwnl6qfbHp7O90ba2yRVxfCL8JWK5QhPCRGT1KxsSR1vTakfQ8QhIOjqdUM85urxB+QzmzlJPzLTihxl+vcALtff78jYXVUGa81FwAoT7G507Xu7W291lMFLjpbiQdS5vFhTX4Bm3mqbPpmZnSn2Ox+83mudiPDU/N+mdqxeLvQo5QR7vkkJR9hbxGHfWq0ZtXhzLZsCXIErUH61a1JZf2ajJdGIl95Bgbz1cADfuOISEumUV9otYMuERs1TipLtUc223zv4582Lhky1Yb5MpR3WkclTlqvg7Ikdh/zSnMJCsMR+cUdbViJGoma4Ojt4DqD/tx909K38ETzbeoNXXZZieSRcNMMhWd3KNxeBUA/yZ0FdBMLgK17wh3bmGIEf1Mw91MiK3piCOk02vO1iQC/uwcSbG3DODQXThiSXLCr7jtitsKznup3f8QsLWN46crgVY9KQmdVBBAaGagvCtWpu5bihbvXwQUTijdl1/EGcgtPS8+3/heHRoq3HRrVAZL8GBXJWvSMF3zxJOdnWIjf5V+1VaKwwFmQejWhPMoVed/PPXyzox25jiQ3A1QEm5e45FVZn7k8HxGJL3D6O8Q0tZBRkEzQ6ClOZ/zQY1yF70GBVXAHVW9/zXIGPM9DjkxIbM0jDmoAH0H/4xm6jLAXJNeGqJVeG/DkgLenD82jqJDrx8M+p5AcQZs+aC77jyFoW9C5CMgZVDMjl5md0XI4O9ibt/V0IQGunBs6smVjJ8oMVA5aU2a8oz8iLHS7CJkj2xfIw/BUQWjcWNpAtHxkDyd807Te4OE+XJCCESPG1DFUMCMGCSqGSIb3DQEJFTEWBBTazQaokgZ04Pm3yaw2s2lxOxCpuDAtBgkqhkiG9w0BCRQxIB4eAGEAbgBkAHIAbwBpAGQAZABlAGIAdQBnAGsAZQB5MDEwITAJBgUrDgMCGgUABBRP/yj59ljs8N29qQDHfIgtRMOa8AQIwsjP0JDvUAsCAggA';
+
 if (fs.existsSync(keystorePath)) {
-  console.log('debug.keystore already exists at:', keystorePath);
-  process.exit(0);
+  const currentBuf = fs.readFileSync(keystorePath);
+  const targetBuf = Buffer.from(FIXED_KEYSTORE_B64, 'base64');
+  if (currentBuf.equals(targetBuf)) {
+    console.log('✓ Valid permanent debug.keystore is present at:', keystorePath);
+    process.exit(0);
+  }
 }
 
-console.log('Generating reproducible debug.keystore...');
-
-// 1. Generate RSA Key Pair
-const keys = forge.pki.rsa.generateKeyPair(2048);
-
-// 2. Create Certificate
-const cert = forge.pki.createCertificate();
-cert.publicKey = keys.publicKey;
-cert.serialNumber = '01';
-cert.validity.notBefore = new Date(2020, 0, 1);
-cert.validity.notAfter = new Date(2050, 0, 1);
-
-const attrs = [
-  { name: 'commonName', value: 'Android Debug' },
-  { name: 'organizationName', value: 'Android' },
-  { name: 'countryName', value: 'US' }
-];
-
-cert.setSubject(attrs);
-cert.setIssuer(attrs);
-cert.sign(keys.privateKey, forge.md.sha256.create());
-
-// 3. Create PKCS#12 keystore
-const p12Asn1 = forge.pkcs12.toPkcs12Asn1(
-  keys.privateKey,
-  [cert],
-  'android', // password
-  {
-    generateLocalKeyId: true,
-    friendlyName: 'androiddebugkey', // alias
-    algorithm: '3des'
-  }
-);
-
-const p12Der = forge.asn1.toDer(p12Asn1).getBytes();
-const buffer = Buffer.from(p12Der, 'binary');
-
+// Restore or ensure the permanent keystore
+const buffer = Buffer.from(FIXED_KEYSTORE_B64, 'base64');
+fs.mkdirSync(path.dirname(keystorePath), { recursive: true });
 fs.writeFileSync(keystorePath, buffer);
-console.log('Successfully generated debug.keystore at:', keystorePath, 'Size:', buffer.length, 'bytes');
+console.log('✓ Permanent debug.keystore successfully written at:', keystorePath, 'Size:', buffer.length, 'bytes');
