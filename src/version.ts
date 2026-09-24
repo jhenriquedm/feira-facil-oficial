@@ -14,14 +14,23 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.4.0',
-  buildNumber: 50,
+  version: '1.4.1',
+  buildNumber: 51,
   releaseDate: '2026-09-24',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.4.1',
+      date: '2026-09-24',
+      highlights: [
+        'Mecanismo automático de invalidação de cache (Limpeza de CacheStorage e ServiceWorker ao atualizar)',
+        'Bump do versionCode para 51 garantindo sobreposição limpa no Android',
+        'Controles avançados no leitor com zoom 1.0x-2.5x e lanterna'
+      ]
+    },
     {
       version: '1.4.0',
       date: '2026-09-24',
