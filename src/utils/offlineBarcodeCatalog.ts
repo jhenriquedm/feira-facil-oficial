@@ -10,6 +10,7 @@ import rawCatalog from '../data/offlineBarcodeCatalog.json';
 import { normalizeBrand } from './brand';
 import { normalizeProductUnit } from './units';
 import { Product, Category } from '../types';
+import { getApiUrl } from './apiConfig';
 
 export interface OfflineCatalogProduct {
   barcode: string;
@@ -251,7 +252,7 @@ export async function lookupBarcodeWithHierarchy(
   const isOnline = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
   if (isOnline) {
     try {
-      const res = await fetch(`/api/barcode/lookup?code=${encodeURIComponent(clean)}`);
+      const res = await fetch(getApiUrl(`/api/barcode/lookup?code=${encodeURIComponent(clean)}`));
       if (res.ok) {
         const data = await res.json();
         if (data.found && data.name) {

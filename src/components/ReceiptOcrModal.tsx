@@ -9,6 +9,7 @@ import { Category, Product } from '../types';
 import { sanitizeAndCapitalize } from '../utils/textFormatters';
 import { PRODUCT_UNITS, normalizeProductUnit } from '../utils/units';
 import { normalizeBrand } from '../utils/brand';
+import { getApiUrl } from '../utils/apiConfig';
 
 export interface OcrExtractedItem {
   id: string;
@@ -215,6 +216,9 @@ export function ReceiptOcrModal({
       }
 
       streamRef.current = stream;
+      setIsCameraActive(true);
+
+      // Immediately connect stream to video element if already mounted
       if (videoRef.current) {
         const v = videoRef.current;
         v.muted = true;
@@ -223,19 +227,8 @@ export function ReceiptOcrModal({
         v.setAttribute('playsinline', 'true');
         v.setAttribute('webkit-playsinline', 'true');
         v.srcObject = stream;
-        
-        v.onloadedmetadata = () => {
-          v.play().catch((playErr) => {
-            console.warn('Erro ao reproduzir vídeo no onloadedmetadata:', playErr);
-          });
-        };
-        try {
-          await v.play();
-        } catch (e) {
-          console.warn('Play imediato rejeitado:', e);
-        }
+        v.play().catch(() => {});
       }
-      setIsCameraActive(true);
 
       // Check track capabilities (Torch, Hardware Zoom, Autofocus)
       const track = stream.getVideoTracks()[0];
@@ -280,6 +273,22 @@ export function ReceiptOcrModal({
       );
     }
   };
+
+  // Ensure stream is attached to video element as soon as it mounts in DOM
+  useEffect(() => {
+    if (isCameraActive && videoRef.current && streamRef.current) {
+      const v = videoRef.current;
+      v.muted = true;
+      v.defaultMuted = true;
+      v.playsInline = true;
+      v.setAttribute('playsinline', 'true');
+      v.setAttribute('webkit-playsinline', 'true');
+      if (v.srcObject !== streamRef.current) {
+        v.srcObject = streamRef.current;
+      }
+      v.play().catch((e) => console.warn('Falha ao reproduzir stream:', e));
+    }
+  }, [isCameraActive]);
 
   const handleCapturePhoto = () => {
     if (!videoRef.current) return;
@@ -338,7 +347,7 @@ export function ReceiptOcrModal({
     setErrorMessage('');
 
     try {
-      const response = await fetch('/api/gemini/receipt-ocr', {
+      const response = await fetch(getApiUrl('/api/gemini/receipt-ocr'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -352,7 +361,13 @@ export function ReceiptOcrModal({
         throw new Error(errorData.error || 'Erro ao processar cupom fiscal com IA.');
       }
 
-      const result = await response.json();
+      const responseText = await response.text();
+      let result: any;
+      try {
+        result = JSON.parse(responseText);
+      } catch {
+        throw new Error('Falha ao comunicar com o servidor de IA. Verifique sua conexão com a internet.');
+      }
 
       if (!result.items || !Array.isArray(result.items) || result.items.length === 0) {
         throw new Error('Nenhum item de compra foi reconhecido na imagem do cupom. Tente uma foto mais nítida e bem iluminada.');
@@ -521,6 +536,10 @@ export function ReceiptOcrModal({
                         el.defaultMuted = true;
                         el.setAttribute('playsinline', 'true');
                         el.setAttribute('webkit-playsinline', 'true');
+                        if (streamRef.current && el.srcObject !== streamRef.current) {
+                          el.srcObject = streamRef.current;
+                          el.play().catch(() => {});
+                        }
                       }
                     }}
                     autoPlay

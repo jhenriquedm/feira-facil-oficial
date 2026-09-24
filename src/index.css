@@ -99,3 +99,20 @@ body {
     font-size: 16px !important;
   }
 }
+
+/* Ensure Camera Viewport and injected video/canvas elements always fill the screen nicely */
+#barcode-reader-viewport,
+#barcode-reader-viewport video,
+#barcode-reader-viewport canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  display: block !important;
+  background-color: transparent !important;
+}
+
+#barcode-reader-viewport div {
+  width: 100% !important;
+  height: 100% !important;
+}
+

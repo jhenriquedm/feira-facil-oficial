@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Purchase, PurchaseItem, Category, Product, PURCHASE_TYPE_LABELS } from '../types';
 import { formatBrandDisplay } from '../utils/brand';
+import { getApiUrl } from '../utils/apiConfig';
 
 interface ReportsProps {
   purchases: Purchase[];
@@ -324,7 +325,7 @@ export function Reports({ purchases, purchaseItems, products, categories }: Repo
         };
       });
 
-      const response = await fetch('/api/gemini/expense-insights', {
+      const response = await fetch(getApiUrl('/api/gemini/expense-insights'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ shoppingHistory: simplifiedHistory })

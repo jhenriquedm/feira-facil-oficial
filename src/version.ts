@@ -14,14 +14,25 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.4.2',
-  buildNumber: 52,
+  version: '1.4.3',
+  buildNumber: 53,
   releaseDate: '2026-09-24',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.4.3',
+      date: '2026-09-24',
+      highlights: [
+        'Resolução definitiva do erro "Unexpected token <" conectando o app nativo diretamente à nuvem de IA via getApiUrl',
+        'Correção do ciclo de vida da câmera no Leitor OCR: stream agora é acoplado imediatamente ao elemento de vídeo',
+        'Estilização forçada em CSS no viewport do leitor de código de barras para preenchimento de 100% sem bordas pretas',
+        'Remoção completa do ícone circular de Play do WebView substituindo o pôster de vídeo por bitmap transparente',
+        'Habilitação de cabeçalhos CORS no servidor backend para aceitar requisições de origem móvel Capacitor'
+      ]
+    },
     {
       version: '1.4.2',
       date: '2026-09-24',
