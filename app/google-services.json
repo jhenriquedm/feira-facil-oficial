@@ -1,0 +1,84 @@
+{
+  "project_info": {
+    "project_number": "901690992750",
+    "project_id": "gen-lang-client-0502245709",
+    "storage_bucket": "gen-lang-client-0502245709.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:901690992750:android:4e57c4fd142255e6c4de7f",
+        "android_client_info": {
+          "package_name": "com.feirafacil.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "901690992750-u51ukgpqnt1unnvsjigvrpneo2g65tbm.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.feirafacil.app",
+            "certificate_hash": "dacd06a8920674e0f9b7c9ac36b369713b10a9b8"
+          }
+        },
+        {
+          "client_id": "901690992750-jbuc5p2bebr2940uaorqtn5qcp72q6cp.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAvMUURj2hZ9oqj-BTJvk_lcVQi8kR7zco"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "901690992750-jbuc5p2bebr2940uaorqtn5qcp72q6cp.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:901690992750:android:4d536b5b23a48706c4de7f",
+        "android_client_info": {
+          "package_name": "com.gestaofinanceira.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "901690992750-m9tpgql30vpfnsfp2ffbrubdll1gmndl.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gestaofinanceira.app",
+            "certificate_hash": "8d708a2172a69f94b66ee2e986ea54927f125ec2"
+          }
+        },
+        {
+          "client_id": "901690992750-jbuc5p2bebr2940uaorqtn5qcp72q6cp.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAvMUURj2hZ9oqj-BTJvk_lcVQi8kR7zco"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "901690992750-jbuc5p2bebr2940uaorqtn5qcp72q6cp.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
