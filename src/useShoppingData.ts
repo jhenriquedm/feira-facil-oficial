@@ -1059,7 +1059,29 @@ export function useShoppingData() {
       return;
     }
 
-    // Generic error when invalid
+    // Generic error when invalid - check if user exists in Firestore/Local to provide specific guidance
+    let existingProfileForEmail: UserProfile | null = null;
+    if (isOnline) {
+      try {
+        const q = query(collection(db, 'users'), where('email', '==', cleanedEmail));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          existingProfileForEmail = { id: snap.docs[0].id, ...snap.docs[0].data() } as UserProfile;
+        }
+      } catch (_) {}
+    }
+    if (!existingProfileForEmail) {
+      existingProfileForEmail = localUsers.find(u => u.email && u.email.toLowerCase() === cleanedEmail) || null;
+    }
+
+    if (existingProfileForEmail) {
+      if (!existingProfileForEmail.passwordHash) {
+        throw new Error("Esta conta foi criada com o Google. Clique em 'Entrar com Google' para acessar ou use 'Esqueceu a senha?' para cadastrar uma senha.");
+      } else {
+        throw new Error("Senha incorreta. Verifique sua senha ou clique em 'Esqueceu a senha?' para redefinir seu acesso.");
+      }
+    }
+
     throw new Error(genericInvalidError);
   };
 
@@ -1172,8 +1194,9 @@ export function useShoppingData() {
 
   const loginWithGoogle = async () => {
     setIsSyncing(true);
+    let googleEmail: string | null = null;
     try {
-      let firebaseUser: User;
+      let firebaseUser: User | null = null;
 
       if (Capacitor.isNativePlatform()) {
         try {
@@ -1191,20 +1214,105 @@ export function useShoppingData() {
         } catch (err) {}
 
         const googleUser = await GoogleAuth.signIn();
+        googleEmail = googleUser?.email || null;
         const idToken = googleUser?.authentication?.idToken || (googleUser as any)?.idToken || (googleUser as any)?.authentication?.accessToken;
 
         if (!idToken) {
-          throw new Error('Não foi possível obter o Token do Google.');
+          throw new Error('Não foi possível obter o Token de Autenticação do Google.');
         }
 
         const credential = GoogleAuthProvider.credential(idToken);
-        const userCredential = await signInWithCredential(auth, credential);
-        firebaseUser = userCredential.user;
+        try {
+          const userCredential = await signInWithCredential(auth, credential);
+          firebaseUser = userCredential.user;
+        } catch (credErr: any) {
+          if (
+            credErr.code === 'auth/account-exists-with-different-credential' ||
+            credErr.code === 'auth/credential-already-in-use' ||
+            credErr.code === 'auth/email-already-in-use' ||
+            credErr?.message?.includes('account-exists-with-different-credential')
+          ) {
+            googleEmail = credErr.customData?.email || credErr.email || googleEmail;
+            firebaseUser = null;
+          } else {
+            throw credErr;
+          }
+        }
       } else {
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: 'select_account' });
-        const userCredential = await signInWithPopup(auth, provider);
-        firebaseUser = userCredential.user;
+        try {
+          const userCredential = await signInWithPopup(auth, provider);
+          firebaseUser = userCredential.user;
+        } catch (popupErr: any) {
+          if (
+            popupErr.code === 'auth/account-exists-with-different-credential' ||
+            popupErr.code === 'auth/credential-already-in-use' ||
+            popupErr.code === 'auth/email-already-in-use' ||
+            popupErr?.message?.includes('account-exists-with-different-credential')
+          ) {
+            googleEmail = popupErr.customData?.email || popupErr.email || null;
+            firebaseUser = null;
+          } else {
+            throw popupErr;
+          }
+        }
+      }
+
+      // If firebaseUser is null due to account-exists-with-different-credential, attempt self-healing sign-in
+      if (!firebaseUser && googleEmail) {
+        const targetEmail = googleEmail.toLowerCase();
+        let matchedProfile: UserProfile | null = null;
+
+        if (isOnline) {
+          try {
+            const q = query(collection(db, 'users'), where('email', '==', targetEmail));
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+              matchedProfile = { id: snap.docs[0].id, ...snap.docs[0].data() } as UserProfile;
+            }
+          } catch (fErr) {
+            console.warn("Firestore lookup error for Google existing user:", fErr);
+          }
+        }
+
+        if (!matchedProfile) {
+          const localUsers = getLocalUsers();
+          matchedProfile = localUsers.find(u => u.email && u.email.toLowerCase() === targetEmail) || null;
+        }
+
+        if (matchedProfile) {
+          const activeUser: OfflineUser = {
+            uid: matchedProfile.id,
+            email: matchedProfile.email,
+            displayName: matchedProfile.name || 'Usuário',
+            photoURL: matchedProfile.photoURL,
+            isOffline: !isOnline
+          };
+
+          setUser(activeUser);
+          setUserProfile(matchedProfile);
+          if (matchedProfile.color) setThemeColor(matchedProfile.color);
+
+          saveUserData('user_profile', matchedProfile, matchedProfile.id);
+          localStorage.setItem('feira_active_offline_session', JSON.stringify(activeUser));
+          localStorage.setItem('feira_offline_session', JSON.stringify({
+            email: matchedProfile.email,
+            uid: matchedProfile.id,
+            displayName: matchedProfile.name,
+            photoURL: matchedProfile.photoURL,
+            canUseOffline: true
+          }));
+
+          setupUserDataListeners(matchedProfile.id, matchedProfile.name, matchedProfile.email);
+          return;
+        } else {
+          throw new Error("Sua conta já existe no Firebase cadastrada via E-mail e Senha. Entre com seu e-mail e senha no formulário ou redefina sua senha na opção 'Esqueceu a senha?'.");
+        }
+      }
+
+      if (!firebaseUser) {
+        throw new Error("Não foi possível concluir a autenticação com o Google.");
       }
 
       // Enable offline mode
@@ -1277,7 +1385,8 @@ export function useShoppingData() {
         code.includes('auth/popup-closed-by-user') ||
         code.includes('auth/cancelled-popup-request') ||
         code.includes('popup-closed-by-user') ||
-        code.includes('cancelled-popup-request')
+        code.includes('cancelled-popup-request') ||
+        code.includes('12501')
       ) {
         // User closed or dismissed Google login popup - silent return without noisy console errors
         return;
@@ -1287,7 +1396,7 @@ export function useShoppingData() {
         throw new Error("A janela de autenticação do Google foi bloqueada pelo navegador. Permita pop-ups neste site para entrar com o Google.");
       }
       console.error("Erro ao autenticar com Google:", error);
-      throw error;
+      throw new Error(error.message || "Erro ao conectar com o Google. Se você já possui conta com este e-mail, entre com sua senha ou recupere seu acesso.");
     } finally {
       setIsSyncing(false);
     }
