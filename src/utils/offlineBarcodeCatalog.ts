@@ -163,96 +163,215 @@ export function getOfflineDatabaseStats(): {
   };
 }
 
+function formatProductName(str: string): string {
+  if (!str) return '';
+  return str
+    .trim()
+    .split(/\s+/)
+    .map((word, idx) => {
+      const lower = word.toLowerCase();
+      // Keep small prepositions in lowercase
+      if (idx > 0 && ['de', 'do', 'da', 'dos', 'das', 'com', 'sem', 'e', 'em', 'para', 'ao', 'na', 'no'].includes(lower)) {
+        return lower;
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(' ');
+}
+
 /**
  * Queries public open barcode databases directly from the client (Open Food Facts, Open Beauty Facts, Open Products Facts)
  * as well as backend server endpoint fallback.
  */
 async function fetchOnlineBarcodeDirect(code: string): Promise<OfflineCatalogProduct | null> {
-  const sources = [
-    { url: `https://world.openfoodfacts.org/api/v2/product/${code}.json`, defaultCat: 'Mercearia' },
-    { url: `https://br.openfoodfacts.org/api/v2/product/${code}.json`, defaultCat: 'Mercearia' },
-    { url: `https://world.openbeautyfacts.org/api/v2/product/${code}.json`, defaultCat: 'Higiene' },
-    { url: `https://world.openproductsfacts.org/api/v2/product/${code}.json`, defaultCat: 'Limpeza' }
-  ];
+  const cleanCode = code.trim().replace(/\D/g, '');
+  if (!cleanCode) return null;
 
-  for (const src of sources) {
-    try {
-      const res = await fetch(src.url, {
-        headers: { 'User-Agent': 'FeiraFacil/1.4 (Android Mobile App)' },
-        signal: AbortSignal.timeout(3500)
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.status === 1 && json.product) {
-          const p = json.product;
-          const name = (p.product_name_pt || p.product_name || p.generic_name_pt || p.generic_name || '').trim();
-          if (name && name.length >= 2) {
+  // Test primary code and normalized variations (e.g. UPC without leading zero or padded to 13 digits)
+  const codeVariations = Array.from(new Set([
+    cleanCode,
+    cleanCode.padStart(13, '0'),
+    cleanCode.replace(/^0+/, '')
+  ])).filter(c => c.length >= 6);
+
+  for (const queryCode of codeVariations) {
+    const sources = [
+      { url: `https://world.openfoodfacts.org/api/v2/product/${queryCode}.json`, defaultCat: 'Mercearia' },
+      { url: `https://br.openfoodfacts.org/api/v2/product/${queryCode}.json`, defaultCat: 'Mercearia' },
+      { url: `https://world.openbeautyfacts.org/api/v2/product/${queryCode}.json`, defaultCat: 'Higiene' },
+      { url: `https://world.openproductsfacts.org/api/v2/product/${queryCode}.json`, defaultCat: 'Limpeza' }
+    ];
+
+    for (const src of sources) {
+      try {
+        const res = await fetch(src.url, {
+          headers: { 'User-Agent': 'FeiraFacil/1.4 (Android Mobile App)' },
+          signal: AbortSignal.timeout(3500)
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.status === 1 && json.product) {
+            const p = json.product;
+            let name = (
+              p.product_name_pt ||
+              p.product_name ||
+              p.generic_name_pt ||
+              p.generic_name ||
+              p.product_name_en ||
+              p.abbreviated_product_name ||
+              ''
+            ).trim();
+
             const rawBrand = (p.brands || p.brand_owner || '').split(',')[0].trim();
             const brand = normalizeBrand(rawBrand);
 
-            const catHierarchy = `${(p.categories_tags || []).join(' ')} ${name} ${rawBrand}`.toLowerCase();
-            let category = src.defaultCat;
-            let unit = 'Unidade';
-
-            if (catHierarchy.includes('beverage') || catHierarchy.includes('bebida') || catHierarchy.includes('suco') || catHierarchy.includes('refrigerante') || catHierarchy.includes('cerveja') || catHierarchy.includes('água') || catHierarchy.includes('vinho')) {
-              category = 'Bebidas';
-              unit = 'Unidade';
-            } else if (catHierarchy.includes('carne') || catHierarchy.includes('açougue') || catHierarchy.includes('acougue') || catHierarchy.includes('frango') || catHierarchy.includes('peixe') || catHierarchy.includes('bovino') || catHierarchy.includes('suíno')) {
-              category = 'Açougue';
-              unit = 'Kg';
-            } else if (catHierarchy.includes('fruta') || catHierarchy.includes('verdura') || catHierarchy.includes('legume') || catHierarchy.includes('hortifruti') || catHierarchy.includes('vegetable')) {
-              category = 'Hortifruti';
-              unit = 'Kg';
-            } else if (catHierarchy.includes('limpeza') || catHierarchy.includes('deterg') || catHierarchy.includes('sabao') || catHierarchy.includes('sabão') || catHierarchy.includes('desinfetante') || catHierarchy.includes('amaciante') || catHierarchy.includes('alvejante')) {
-              category = 'Limpeza';
-              unit = 'Unidade';
-            } else if (catHierarchy.includes('dairy') || catHierarchy.includes('leite') || catHierarchy.includes('queijo') || catHierarchy.includes('iogurte') || catHierarchy.includes('manteiga') || catHierarchy.includes('requeij')) {
-              category = 'Laticínios';
-              unit = 'Unidade';
-            } else if (catHierarchy.includes('pão') || catHierarchy.includes('pao') || catHierarchy.includes('padaria') || catHierarchy.includes('biscoito') || catHierarchy.includes('bolacha') || catHierarchy.includes('bolo') || catHierarchy.includes('torrada')) {
-              category = 'Padaria';
-              unit = 'Pacote';
-            } else if (catHierarchy.includes('higiene') || catHierarchy.includes('shampoo') || catHierarchy.includes('sabonete') || catHierarchy.includes('dental') || catHierarchy.includes('desodorante') || catHierarchy.includes('cosmetic')) {
-              category = 'Higiene';
-              unit = 'Unidade';
-            } else if (catHierarchy.includes('farmácia') || catHierarchy.includes('farmacia') || catHierarchy.includes('medicamento') || catHierarchy.includes('remedio') || catHierarchy.includes('remédio') || catHierarchy.includes('comprimido')) {
-              category = 'Farmácia';
-              unit = 'Caixa';
+            // If product_name is missing in database, construct from categories and brand
+            if (!name || name.length < 2) {
+              const catFirst = (p.categories || '').split(',')[0]?.trim() || (p.categories_tags || [])[0]?.replace(/^..:/, '') || '';
+              if (catFirst && brand) {
+                name = `${catFirst} ${brand}`;
+              } else if (catFirst) {
+                name = catFirst;
+              } else if (brand) {
+                name = `Produto ${brand}`;
+              }
             }
 
-            if (p.quantity) {
-              const q = String(p.quantity).toLowerCase();
-              if (q.includes('kg') || q.includes('quilo')) unit = 'Kg';
-              else if (q.includes('g') && !q.includes('kg')) unit = 'Grama';
-              else if (q.includes('l') || q.includes('litro')) unit = 'Litros';
-            }
+            if (name && name.length >= 2) {
+              const catHierarchy = `${(p.categories_tags || []).join(' ')} ${(p.categories || '')} ${name} ${rawBrand}`.toLowerCase();
+              let category = src.defaultCat;
+              let unit = 'Unidade';
 
-            return {
-              barcode: code,
-              name,
-              brand,
-              category,
-              unit: normalizeProductUnit(unit)
-            };
+              // Specific high-priority categories
+              if (
+                catHierarchy.includes('margarina') ||
+                catHierarchy.includes('manteiga') ||
+                catHierarchy.includes('requeij') ||
+                catHierarchy.includes('iogurte') ||
+                catHierarchy.includes('leite') ||
+                catHierarchy.includes('queijo') ||
+                catHierarchy.includes('dairy') ||
+                catHierarchy.includes('laticín')
+              ) {
+                category = 'Laticínios';
+                unit = catHierarchy.includes('margarina') || catHierarchy.includes('manteiga') || catHierarchy.includes('requeij') ? 'Pote' : 'Unidade';
+              } else if (
+                catHierarchy.includes('polvilho') ||
+                catHierarchy.includes('tapioca') ||
+                catHierarchy.includes('farinha') ||
+                catHierarchy.includes('açúcar') ||
+                catHierarchy.includes('arroz') ||
+                catHierarchy.includes('feijão') ||
+                catHierarchy.includes('molho') ||
+                catHierarchy.includes('tempero') ||
+                catHierarchy.includes('pimenta') ||
+                catHierarchy.includes('azeite') ||
+                catHierarchy.includes('óleo') ||
+                catHierarchy.includes('café') ||
+                catHierarchy.includes('cafe')
+              ) {
+                category = 'Mercearia';
+                unit = catHierarchy.includes('molho') || catHierarchy.includes('pimenta') || catHierarchy.includes('azeite') ? 'Frasco' : 'Pacote';
+              } else if (
+                catHierarchy.includes('cerveja') ||
+                catHierarchy.includes('refrigerante') ||
+                catHierarchy.includes('suco') ||
+                catHierarchy.includes('água') ||
+                catHierarchy.includes('agua') ||
+                catHierarchy.includes('vinho') ||
+                catHierarchy.includes('beverage') ||
+                catHierarchy.includes('boisson')
+              ) {
+                category = 'Bebidas';
+                unit = 'Garrafa';
+              } else if (
+                catHierarchy.includes('carne') ||
+                catHierarchy.includes('açougue') ||
+                catHierarchy.includes('acougue') ||
+                catHierarchy.includes('frango') ||
+                catHierarchy.includes('peixe') ||
+                catHierarchy.includes('bovino') ||
+                catHierarchy.includes('suíno') ||
+                catHierarchy.includes('presunto') ||
+                catHierarchy.includes('linguiça')
+              ) {
+                category = 'Açougue';
+                unit = 'Kg';
+              } else if (
+                catHierarchy.includes('fruta') ||
+                catHierarchy.includes('verdura') ||
+                catHierarchy.includes('legume') ||
+                catHierarchy.includes('hortifruti')
+              ) {
+                category = 'Hortifruti';
+                unit = 'Kg';
+              } else if (
+                catHierarchy.includes('limpeza') ||
+                catHierarchy.includes('deterg') ||
+                catHierarchy.includes('sabao') ||
+                catHierarchy.includes('sabão') ||
+                catHierarchy.includes('desinfetante') ||
+                catHierarchy.includes('amaciante') ||
+                catHierarchy.includes('alvejante')
+              ) {
+                category = 'Limpeza';
+                unit = 'Frasco';
+              } else if (
+                catHierarchy.includes('higiene') ||
+                catHierarchy.includes('shampoo') ||
+                catHierarchy.includes('sabonete') ||
+                catHierarchy.includes('dental') ||
+                catHierarchy.includes('desodorante') ||
+                catHierarchy.includes('cosmetic')
+              ) {
+                category = 'Higiene';
+                unit = 'Unidade';
+              } else if (
+                catHierarchy.includes('farmácia') ||
+                catHierarchy.includes('farmacia') ||
+                catHierarchy.includes('medicamento') ||
+                catHierarchy.includes('remedio') ||
+                catHierarchy.includes('remédio') ||
+                catHierarchy.includes('comprimido')
+              ) {
+                category = 'Farmácia';
+                unit = 'Caixa';
+              }
+
+              if (p.quantity) {
+                const q = String(p.quantity).toLowerCase();
+                if (q.includes('kg') || q.includes('quilo')) unit = 'Kg';
+                else if (q.includes('g') && !q.includes('kg')) unit = 'Grama';
+                else if (q.includes('l') || q.includes('litro')) unit = 'Litros';
+              }
+
+              return {
+                barcode: cleanCode,
+                name: formatProductName(name),
+                brand,
+                category,
+                unit: normalizeProductUnit(unit)
+              };
+            }
           }
         }
+      } catch {
+        // Continue to next provider
       }
-    } catch {
-      // Continue to next provider
     }
   }
 
   // Fallback to backend /api/barcode/lookup if available
   try {
-    const res = await fetch(getApiUrl(`/api/barcode/lookup?code=${encodeURIComponent(code)}`), {
+    const res = await fetch(getApiUrl(`/api/barcode/lookup?code=${encodeURIComponent(cleanCode)}`), {
       signal: AbortSignal.timeout(3500)
     });
     if (res.ok) {
       const data = await res.json();
       if (data && data.found && data.name) {
         return {
-          barcode: code,
-          name: data.name.trim(),
+          barcode: cleanCode,
+          name: formatProductName(data.name),
           brand: normalizeBrand(data.brand),
           category: data.categorySuggestion || 'Mercearia',
           unit: normalizeProductUnit(data.unit)

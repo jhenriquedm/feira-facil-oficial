@@ -506,9 +506,20 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     setActiveTab('manual');
   };
 
+  // Reset scan state and cleanly reboot camera stream
+  const handleResetScan = async () => {
+    setLookupResult(null);
+    setFileDecodeError(null);
+    setActiveTab('camera');
+    await stopCamera();
+    setTimeout(() => {
+      startCamera();
+    }, 120);
+  };
+
   // Ensure stream is attached to video element as soon as it mounts in DOM
   useEffect(() => {
-    if (activeTab === 'camera' && videoRef.current && streamRef.current) {
+    if (activeTab === 'camera' && !lookupResult && videoRef.current && streamRef.current) {
       const v = videoRef.current;
       v.muted = true;
       v.defaultMuted = true;
@@ -520,7 +531,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       }
       v.play().catch(() => {});
     }
-  }, [activeTab]);
+  }, [activeTab, lookupResult]);
 
   useEffect(() => {
     if (isOpen) {
@@ -726,11 +737,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   <div className="flex flex-col-reverse sm:flex-row gap-2 pt-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        setLookupResult(null);
-                        startCamera();
-                      }}
-                      className="w-full sm:flex-1 py-3 px-4 border border-neutral-200 rounded-2xl text-xs font-bold text-neutral-700 hover:bg-neutral-50 transition-colors flex items-center justify-center gap-1.5"
+                      onClick={handleResetScan}
+                      className="w-full sm:flex-1 py-3 px-4 border border-neutral-200 rounded-2xl text-xs font-bold text-neutral-700 hover:bg-neutral-50 active:scale-98 transition-all flex items-center justify-center gap-1.5"
                     >
                       <RefreshCw size={14} />
                       <span>Ler Outro</span>
@@ -856,11 +864,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => {
-                          setLookupResult(null);
-                          startCamera();
-                        }}
-                        className="flex-1 py-2.5 px-3 text-xs font-bold text-neutral-600 hover:text-neutral-900 border border-neutral-200 rounded-2xl transition-colors flex items-center justify-center gap-1.5"
+                        onClick={handleResetScan}
+                        className="flex-1 py-2.5 px-3 text-xs font-bold text-neutral-600 hover:text-neutral-900 border border-neutral-200 rounded-2xl active:scale-98 transition-all flex items-center justify-center gap-1.5"
                       >
                         <RefreshCw size={13} />
                         <span>Ler Outro</span>
@@ -975,6 +980,26 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                         Leitura em tela inteira • Não precisa centralizar
                       </span>
                     </div>
+                  </div>
+                )}
+
+                {/* Idle / Re-activate Camera Overlay */}
+                {!isScanning && !isLookingUp && (
+                  <div className="absolute inset-0 bg-neutral-900/85 backdrop-blur-xs flex flex-col items-center justify-center p-4 z-30 gap-3">
+                    <p className="text-white text-xs font-bold text-center">
+                      Câmera pausada
+                    </p>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startCamera();
+                      }}
+                      className="px-5 py-2.5 bg-sky-600 hover:bg-sky-700 active:scale-98 text-white rounded-2xl text-xs font-black flex items-center gap-2 shadow-lg transition-all"
+                    >
+                      <Camera size={16} />
+                      <span>Reativar Câmera</span>
+                    </button>
                   </div>
                 )}
               </div>

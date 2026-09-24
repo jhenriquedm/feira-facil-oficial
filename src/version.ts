@@ -14,14 +14,24 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.4.6',
-  buildNumber: 56,
+  version: '1.4.7',
+  buildNumber: 57,
   releaseDate: '2026-09-24',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.4.7',
+      date: '2026-09-24',
+      highlights: [
+        'Correção definitiva da tela preta na câmera ao clicar no botão "Ler Outro" com ciclo de vida assíncrono e botão de reativação imediata',
+        'Extração inteligente de dados online: identifica nome, categoria e marca mesmo quando o campo primário estiver ausente no Open Food Facts (ex: Iogurte Nestlé)',
+        'Mapeamento aprimorado de categorias e unidades: Margarinas, Manteigas e Iogurtes categorizados com precisão em Laticínios com unidade em Pote',
+        'Suporte a variações de códigos UPC/EAN com e sem zeros à esquerda (ex: produtos de 12 e 13 dígitos)'
+      ]
+    },
     {
       version: '1.4.6',
       date: '2026-09-24',
