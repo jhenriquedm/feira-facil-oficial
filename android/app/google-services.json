@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:901690992750:android:4d536b5b23a48706c4de7f",
         "android_client_info": {
-          "package_name": "com.gestaofinanceira.app"
+          "package_name": "com.feirafacil.app"
         }
       },
       "oauth_client": [
@@ -17,7 +17,7 @@
           "client_id": "901690992750-m9tpgql30vpfnsfp2ffbrubdll1gmndl.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.gestaofinanceira.app",
+            "package_name": "com.feirafacil.app",
             "certificate_hash": "8d708a2172a69f94b66ee2e986ea54927f125ec2"
           }
         },

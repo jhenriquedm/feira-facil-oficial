@@ -1,4 +1,4 @@
-package com.gestaofinanceira.app;
+package com.feirafacil.app;
 
 import com.getcapacitor.BridgeActivity;
 
