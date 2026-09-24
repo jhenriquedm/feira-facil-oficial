@@ -602,15 +602,8 @@ export function ReceiptOcrModal({
                     )}
                   </div>
 
-                  {/* Camera Guide Overlay */}
-                  <div className="absolute inset-4 border-2 border-dashed border-white/50 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
-                    <span className="text-[11px] font-bold text-white bg-black/65 backdrop-blur-xs px-3 py-1 rounded-full self-start border border-white/10">
-                      Enquadre os itens e preços do cupom
-                    </span>
-                    <span className="text-[10px] text-white/90 bg-black/65 backdrop-blur-xs px-3 py-1 rounded-full self-center border border-white/10">
-                      Distância ideal 20 a 35 cm • Toque na tela para focar
-                    </span>
-                  </div>
+                  {/* Clean Camera Guide Frame (unobstructed, no overlapping text badges) */}
+                  <div className="absolute inset-3 border-2 border-dashed border-white/35 rounded-2xl pointer-events-none" />
 
                   {/* Capture Floating Action Bar */}
                   <div className="absolute bottom-4 inset-x-4 flex items-center justify-between gap-3 pointer-events-auto z-10">

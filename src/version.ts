@@ -14,14 +14,24 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.4.3',
-  buildNumber: 53,
+  version: '1.4.4',
+  buildNumber: 54,
   releaseDate: '2026-09-24',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.4.4',
+      date: '2026-09-24',
+      highlights: [
+        'Remoção de todas as sobreposições de textos conflitantes dentro do visor da câmera no Leitor OCR de cupom fiscal',
+        'Substituição completa do motor do leitor de código de barras para @zxing/library + BarcodeDetector nativo com aceleração por hardware',
+        'Transmissão direta da câmera via getUserMedia no leitor de código de barras, eliminando a tela preta e rejeições de restrições do Html5Qrcode',
+        'Visor limpo e fluido com zoom 1x a 2.5x, foco por toque, lanterna e leitura imediata de códigos EAN-13, EAN-8, UPC e Code-128'
+      ]
+    },
     {
       version: '1.4.3',
       date: '2026-09-24',

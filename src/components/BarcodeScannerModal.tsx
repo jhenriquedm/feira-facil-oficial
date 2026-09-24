@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { 
   Camera, X, Flashlight, RefreshCw, Upload, CheckCircle2, 
   AlertCircle, Sparkles, Loader2, Barcode as BarcodeIcon, Search,
@@ -61,12 +61,13 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const [hasHardwareZoom, setHasHardwareZoom] = useState(false);
   const [focusRing, setFocusRing] = useState<{ x: number; y: number } | null>(null);
 
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const zxingReaderRef = useRef<BrowserMultiFormatReader | null>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraCaptureInputRef = useRef<HTMLInputElement>(null);
   const stopScanningLoopRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
-  const readerElementId = 'barcode-reader-viewport';
 
   // Sound beep & haptic feedback on scan
   const playBeep = () => {
@@ -145,16 +146,24 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
-    if (scannerRef.current) {
+    if (zxingReaderRef.current) {
       try {
-        if (scannerRef.current.isScanning) {
-          await scannerRef.current.stop();
-        }
-        scannerRef.current.clear();
+        zxingReaderRef.current.reset();
       } catch {
         // ignore
       }
-      scannerRef.current = null;
+      zxingReaderRef.current = null;
+    }
+    if (streamRef.current) {
+      try {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      } catch {
+        // ignore
+      }
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
     setIsScanning(false);
     setTorchOn(false);
@@ -164,23 +173,25 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     setZoomLevel(targetZoom);
 
     // 1. Hardware Zoom on Camera Track (if supported by device)
-    if (scannerRef.current && hasHardwareZoom) {
+    if (streamRef.current && hasHardwareZoom) {
       try {
-        await scannerRef.current.applyVideoConstraints({
-          advanced: [{ zoom: targetZoom } as any]
-        });
-        return;
+        const track = streamRef.current.getVideoTracks()[0];
+        if (track) {
+          await (track as any).applyConstraints({
+            advanced: [{ zoom: targetZoom }]
+          });
+          return;
+        }
       } catch (e) {
         console.warn('Hardware zoom falhou, usando zoom digital:', e);
       }
     }
 
     // 2. Digital CSS Zoom fallback on video element
-    const video = document.querySelector(`#${readerElementId} video`) as HTMLVideoElement;
-    if (video) {
-      video.style.transform = targetZoom > 1 ? `scale(${targetZoom})` : 'none';
-      video.style.transformOrigin = 'center center';
-      video.style.transition = 'transform 0.2s ease-out';
+    if (videoRef.current) {
+      videoRef.current.style.transform = targetZoom > 1 ? `scale(${targetZoom})` : 'none';
+      videoRef.current.style.transformOrigin = 'center center';
+      videoRef.current.style.transition = 'transform 0.2s ease-out';
     }
   };
 
@@ -192,235 +203,178 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     setTimeout(() => setFocusRing(null), 1200);
 
     // Resume video playback if Android WebView paused it
-    const video = document.querySelector(`#${readerElementId} video`) as HTMLVideoElement;
-    if (video && video.paused) {
-      video.play().catch(() => {});
+    if (videoRef.current && videoRef.current.paused) {
+      videoRef.current.play().catch(() => {});
     }
 
-    if (scannerRef.current) {
+    if (streamRef.current) {
       try {
-        await scannerRef.current.applyVideoConstraints({
-          advanced: [
-            { focusMode: 'continuous' } as any,
-            { exposureMode: 'continuous' } as any
-          ]
-        });
+        const track = streamRef.current.getVideoTracks()[0];
+        if (track) {
+          await (track as any).applyConstraints({
+            advanced: [
+              { focusMode: 'continuous' },
+              { exposureMode: 'continuous' }
+            ]
+          });
+        }
       } catch {
         // ignore
       }
     }
   };
 
+  const startContinuousScanner = (stream: MediaStream) => {
+    // 1. Configure ZXing Reader
+    const hints = new Map();
+    hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+      BarcodeFormat.EAN_13,
+      BarcodeFormat.EAN_8,
+      BarcodeFormat.UPC_A,
+      BarcodeFormat.UPC_E,
+      BarcodeFormat.CODE_128,
+      BarcodeFormat.CODE_39,
+      BarcodeFormat.QR_CODE
+    ]);
+    hints.set(DecodeHintType.TRY_HARDER, true);
+
+    const reader = new BrowserMultiFormatReader(hints, 100);
+    zxingReaderRef.current = reader;
+
+    // Attach ZXing decodeFromStream to video
+    if (videoRef.current) {
+      try {
+        reader.decodeFromStream(stream, videoRef.current, (result) => {
+          if (stopScanningLoopRef.current) return;
+          if (result && result.getText()) {
+            stopScanningLoopRef.current = true;
+            handleScanSuccess(result.getText());
+          }
+        });
+      } catch (e) {
+        console.warn('Erro ao anexar leitor ZXing ao stream:', e);
+      }
+    }
+
+    // 2. Concurrently run native BarcodeDetector if available on device
+    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+      try {
+        const formats = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'];
+        const nativeDetector = new (window as any).BarcodeDetector({ formats });
+
+        const nativeLoop = async () => {
+          if (stopScanningLoopRef.current) return;
+          try {
+            const v = videoRef.current;
+            if (v && v.readyState >= 2 && !v.paused && !v.ended) {
+              const barcodes = await nativeDetector.detect(v);
+              if (barcodes && barcodes.length > 0 && barcodes[0]?.rawValue) {
+                if (!stopScanningLoopRef.current) {
+                  stopScanningLoopRef.current = true;
+                  handleScanSuccess(barcodes[0].rawValue);
+                  return;
+                }
+              }
+            }
+          } catch {
+            // ignore frame read error
+          }
+
+          if (!stopScanningLoopRef.current) {
+            animationFrameRef.current = requestAnimationFrame(nativeLoop);
+          }
+        };
+
+        animationFrameRef.current = requestAnimationFrame(nativeLoop);
+      } catch (err) {
+        console.info('BarcodeDetector nativo não pôde ser instanciado:', err);
+      }
+    }
+  };
+
   const startCamera = async () => {
-    setIsScanning(true);
+    stopCamera();
     stopScanningLoopRef.current = false;
+    setIsScanning(true);
 
     try {
-      if (scannerRef.current) {
+      const constraints: MediaStreamConstraints = {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      };
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch {
         try {
-          await scannerRef.current.stop();
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment' }
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+      }
+
+      streamRef.current = stream;
+
+      // Ensure video element receives the stream
+      if (videoRef.current) {
+        const v = videoRef.current;
+        v.muted = true;
+        v.defaultMuted = true;
+        v.playsInline = true;
+        v.setAttribute('playsinline', 'true');
+        v.setAttribute('webkit-playsinline', 'true');
+        v.srcObject = stream;
+        try {
+          await v.play();
         } catch {
           // ignore
         }
       }
 
-      const html5QrCode = new Html5Qrcode(readerElementId, {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39,
-          Html5QrcodeSupportedFormats.QR_CODE
-        ],
-        verbose: false,
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true
-        }
-      });
-      scannerRef.current = html5QrCode;
+      // Check capabilities for zoom & flashlight
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const capabilities = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+        setHasTorch(Boolean(capabilities.torch));
+        setHasHardwareZoom(Boolean(capabilities.zoom));
 
-      // Full-viewfinder decoding!
-      const config = {
-        fps: 20,
-        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          return {
-            width: Math.max(260, Math.floor(viewfinderWidth * 0.96)),
-            height: Math.max(180, Math.floor(viewfinderHeight * 0.92))
-          };
-        },
-        aspectRatio: 1.333333,
-        disableFlip: true
-      };
-
-      // Camera constraints: Clean, standard-compliant constraints
-      const cameraCandidates: any[] = [
-        {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        {
-          facingMode: 'environment'
-        },
-        {
-          facingMode: { ideal: 'environment' }
-        },
-        {}
-      ];
-
-      let started = false;
-      for (const camConfig of cameraCandidates) {
-        try {
-          await html5QrCode.start(
-            camConfig as any,
-            config,
-            (decodedText) => {
-              handleScanSuccess(decodedText);
-            },
-            undefined
-          );
-          started = true;
-          break;
-        } catch (err) {
-          console.warn('Configuração de câmera tentada falhou, tentando fallback:', err);
-        }
-      }
-
-      // If generic constraints failed, probe physical camera IDs
-      if (!started) {
-        try {
-          const devices = await Html5Qrcode.getCameras();
-          if (devices && devices.length > 0) {
-            const backCam = devices.find((d) =>
-              d.label.toLowerCase().includes('back') ||
-              d.label.toLowerCase().includes('traseira') ||
-              d.label.toLowerCase().includes('rear') ||
-              d.label.toLowerCase().includes('environment')
-            ) || devices[devices.length - 1];
-
-            await html5QrCode.start(
-              backCam.id,
-              config,
-              (decodedText) => {
-                handleScanSuccess(decodedText);
-              },
-              undefined
-            );
-            started = true;
-          }
-        } catch (deviceErr) {
-          console.warn('Falha no fallback por ID de câmera:', deviceErr);
-        }
-      }
-
-      if (!started) {
-        setIsScanning(false);
-        return;
-      }
-
-      // Ensure video element inside readerElementId has proper attributes and active playback
-      const videoEl = document.querySelector(`#${readerElementId} video`) as HTMLVideoElement;
-      if (videoEl) {
-        videoEl.muted = true;
-        videoEl.defaultMuted = true;
-        videoEl.setAttribute('playsinline', 'true');
-        videoEl.setAttribute('webkit-playsinline', 'true');
-        videoEl.style.width = '100%';
-        videoEl.style.height = '100%';
-        videoEl.style.objectFit = 'cover';
-        if (videoEl.paused) {
-          videoEl.play().catch(() => {});
-        }
-      }
-
-      // Check capabilities (Torch & Hardware Zoom)
-      try {
-        const capabilities = html5QrCode.getRunningTrackCapabilities() as any;
-        if (capabilities) {
-          if (capabilities.torch) {
-            setHasTorch(true);
-          }
-          if (capabilities.zoom) {
-            setHasHardwareZoom(true);
-            // If user has zoom > 1, apply it
-            if (zoomLevel > 1) {
-              await html5QrCode.applyVideoConstraints({
-                advanced: [{ zoom: zoomLevel } as any]
-              });
-            }
-          } else {
-            setHasHardwareZoom(false);
-          }
-
-          // Trigger continuous autofocus
-          if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
-            await html5QrCode.applyVideoConstraints({
-              advanced: [{ focusMode: 'continuous' } as any]
+        // Re-apply zoom if zoomLevel > 1
+        if (capabilities.zoom && zoomLevel > 1) {
+          try {
+            await (track as any).applyConstraints({
+              advanced: [{ zoom: zoomLevel }]
             });
+          } catch {
+            // ignore
           }
         }
-      } catch {
-        setHasTorch(false);
-        setHasHardwareZoom(false);
       }
 
-      // Check for native BarcodeDetector API (Hardware-Accelerated ML on Android Chrome / WebView)
-      // This detects barcodes at any angle, anywhere on screen, even with slight motion
-      if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
-        try {
-          const supported = await (window as any).BarcodeDetector.getSupportedFormats();
-          const targetFormats = [
-            'ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'
-          ].filter((f: string) => supported.includes(f));
-
-          if (targetFormats.length > 0) {
-            const nativeDetector = new (window as any).BarcodeDetector({ formats: targetFormats });
-
-            const scanNativeLoop = async () => {
-              if (stopScanningLoopRef.current) return;
-              try {
-                const videoEl = document.querySelector(`#${readerElementId} video`) as HTMLVideoElement;
-                if (videoEl && videoEl.readyState >= 2 && !videoEl.paused && !videoEl.ended) {
-                  const barcodes = await nativeDetector.detect(videoEl);
-                  if (barcodes && barcodes.length > 0 && barcodes[0]?.rawValue) {
-                    if (!stopScanningLoopRef.current) {
-                      stopScanningLoopRef.current = true;
-                      handleScanSuccess(barcodes[0].rawValue);
-                      return;
-                    }
-                  }
-                }
-              } catch {
-                // ignore transient frame decode error
-              }
-
-              if (!stopScanningLoopRef.current) {
-                animationFrameRef.current = requestAnimationFrame(scanNativeLoop);
-              }
-            };
-
-            animationFrameRef.current = requestAnimationFrame(scanNativeLoop);
-          }
-        } catch (detectorErr) {
-          console.info('BarcodeDetector nativo não pôde ser ativado:', detectorErr);
-        }
-      }
+      // Start dual scanning engine
+      startContinuousScanner(stream);
     } catch (err: any) {
-      console.warn('Erro ao iniciar câmera:', err);
+      console.warn('Erro ao acessar câmera no leitor de código de barras:', err);
       setIsScanning(false);
     }
   };
 
   const toggleTorch = async () => {
-    if (!scannerRef.current || !hasTorch) return;
+    if (!streamRef.current || !hasTorch) return;
     try {
-      const nextTorch = !torchOn;
-      await scannerRef.current.applyVideoConstraints({
-        advanced: [{ torch: nextTorch } as any]
-      });
-      setTorchOn(nextTorch);
+      const track = streamRef.current.getVideoTracks()[0];
+      if (track) {
+        const nextTorch = !torchOn;
+        await (track as any).applyConstraints({
+          advanced: [{ torch: nextTorch }]
+        });
+        setTorchOn(nextTorch);
+      }
     } catch {
       // torch unsupported
     }
@@ -454,22 +408,36 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         }
       }
 
-      // Step 2: Try Html5Qrcode scanFile
-      const html5QrCode = new Html5Qrcode('barcode-file-hidden-canvas', {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39
-        ],
-        verbose: false
-      });
-      const decodedText = await html5QrCode.scanFile(file, true);
-      playBeep();
-      await lookupBarcode(decodedText);
-    } catch (err) {
+      // Step 2: Try ZXing decodeFromImageUrl
+      const hints = new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+        BarcodeFormat.EAN_13,
+        BarcodeFormat.EAN_8,
+        BarcodeFormat.UPC_A,
+        BarcodeFormat.UPC_E,
+        BarcodeFormat.CODE_128,
+        BarcodeFormat.CODE_39,
+        BarcodeFormat.QR_CODE
+      ]);
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      const reader = new BrowserMultiFormatReader(hints);
+      const objectUrl = URL.createObjectURL(file);
+      try {
+        const result = await reader.decodeFromImageUrl(objectUrl);
+        if (result && result.getText()) {
+          playBeep();
+          await lookupBarcode(result.getText());
+          return;
+        }
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+        reader.reset();
+      }
+
+      setFileDecodeError(
+        'Nenhum código de barras legível foi encontrado nesta foto. Mantenha a câmera a cerca de 15 a 25 cm para foco nítido ou digite os números do código.'
+      );
+    } catch (err: any) {
       setFileDecodeError(
         'Nenhum código de barras legível foi encontrado nesta foto. Mantenha a câmera a cerca de 15 a 25 cm para foco nítido ou digite os números do código.'
       );
@@ -537,6 +505,22 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     setLookupResult(null);
     setActiveTab('manual');
   };
+
+  // Ensure stream is attached to video element as soon as it mounts in DOM
+  useEffect(() => {
+    if (activeTab === 'camera' && videoRef.current && streamRef.current) {
+      const v = videoRef.current;
+      v.muted = true;
+      v.defaultMuted = true;
+      v.playsInline = true;
+      v.setAttribute('playsinline', 'true');
+      v.setAttribute('webkit-playsinline', 'true');
+      if (v.srcObject !== streamRef.current) {
+        v.srcObject = streamRef.current;
+      }
+      v.play().catch(() => {});
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (isOpen) {
@@ -893,7 +877,25 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 onClick={handleTapToFocus}
                 className="relative rounded-2xl overflow-hidden bg-black aspect-[4/3] flex items-center justify-center shadow-inner cursor-pointer select-none"
               >
-                <div id={readerElementId} className="w-full h-full object-cover" />
+                <video
+                  ref={(el) => {
+                    if (el) {
+                      videoRef.current = el;
+                      el.muted = true;
+                      el.defaultMuted = true;
+                      el.setAttribute('playsinline', 'true');
+                      el.setAttribute('webkit-playsinline', 'true');
+                      if (streamRef.current && el.srcObject !== streamRef.current) {
+                        el.srcObject = streamRef.current;
+                        el.play().catch(() => {});
+                      }
+                    }
+                  }}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover"
+                />
 
                 {/* Tap to Focus Ring Animation */}
                 {focusRing && (
@@ -1158,9 +1160,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             </div>
           )}
         </div>
-
-        {/* Hidden div for decoding gallery image files */}
-        <div id="barcode-file-hidden-canvas" className="hidden" />
       </div>
     </div>
   );
