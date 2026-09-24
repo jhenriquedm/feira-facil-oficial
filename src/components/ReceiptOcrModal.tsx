@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   Camera, Image as ImageIcon, X, RefreshCw, Check, AlertCircle, 
   Trash2, Plus, Sparkles, Store, Calendar, FileText, CheckCircle2,
-  Receipt, ArrowRight, DollarSign, Tag, HelpCircle
+  Receipt, ArrowRight, DollarSign, Tag, HelpCircle, Flashlight,
+  Smartphone, Info
 } from 'lucide-react';
 import { Category, Product } from '../types';
 import { sanitizeAndCapitalize } from '../utils/textFormatters';
@@ -63,6 +64,13 @@ export function ReceiptOcrModal({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
 
+  // Camera and Focus Enhancements for Receipts
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [hasHardwareZoom, setHasHardwareZoom] = useState(false);
+  const [hasTorch, setHasTorch] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
+  const [focusRing, setFocusRing] = useState<{ x: number; y: number } | null>(null);
+
   // Extracted Result States
   const [extractedMarket, setExtractedMarket] = useState('');
   const [extractedDate, setExtractedDate] = useState(() => new Date().toISOString().substring(0, 10));
@@ -74,6 +82,7 @@ export function ReceiptOcrModal({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraCaptureInputRef = useRef<HTMLInputElement>(null);
 
   // Reset state on open/close
   useEffect(() => {
@@ -87,6 +96,9 @@ export function ReceiptOcrModal({
       setExtractedTotal(undefined);
       setExtractedDiscount(undefined);
       setPurchaseTitle('');
+      setZoomLevel(1);
+      setTorchOn(false);
+      setFocusRing(null);
       setExtractedDate(new Date().toISOString().substring(0, 10));
     } else {
       stopCamera();
@@ -102,32 +114,145 @@ export function ReceiptOcrModal({
       streamRef.current = null;
     }
     setIsCameraActive(false);
+    setTorchOn(false);
+  };
+
+  const handleZoomChange = async (targetZoom: number) => {
+    setZoomLevel(targetZoom);
+
+    // 1. Hardware Zoom on Camera Track (if supported by device)
+    if (streamRef.current && hasHardwareZoom) {
+      const track = streamRef.current.getVideoTracks()[0];
+      if (track) {
+        try {
+          await track.applyConstraints({
+            advanced: [{ zoom: targetZoom } as any]
+          });
+          return;
+        } catch (e) {
+          console.warn('Hardware zoom falhou, usando zoom digital:', e);
+        }
+      }
+    }
+
+    // 2. Digital CSS Zoom fallback on video element
+    if (videoRef.current) {
+      videoRef.current.style.transform = targetZoom > 1 ? `scale(${targetZoom})` : 'none';
+      videoRef.current.style.transformOrigin = 'center center';
+      videoRef.current.style.transition = 'transform 0.2s ease-out';
+    }
+  };
+
+  const toggleTorch = async () => {
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      const nextState = !torchOn;
+      await track.applyConstraints({
+        advanced: [{ torch: nextState } as any]
+      });
+      setTorchOn(nextState);
+    } catch (err) {
+      console.warn('Erro ao alternar lanterna:', err);
+    }
+  };
+
+  const handleTapToFocus = async (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setFocusRing({ x, y });
+    setTimeout(() => setFocusRing(null), 1200);
+
+    if (streamRef.current) {
+      const track = streamRef.current.getVideoTracks()[0];
+      if (track) {
+        try {
+          await track.applyConstraints({
+            advanced: [
+              { focusMode: 'continuous' } as any,
+              { exposureMode: 'continuous' } as any
+            ]
+          });
+        } catch {
+          // ignore
+        }
+      }
+    }
   };
 
   const startCamera = async () => {
     setErrorMessage('');
     try {
       stopCamera();
+
+      // High-resolution constraints for sharp receipt details at distance
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        }
+          width: { min: 1280, ideal: 1920, max: 2560 },
+          height: { min: 720, ideal: 1080, max: 1440 },
+          focusMode: 'continuous'
+        } as any
       };
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }
+        });
+      }
+
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
       setIsCameraActive(true);
+
+      // Check track capabilities (Torch, Hardware Zoom, Autofocus)
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const capabilities = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+        if (capabilities.torch) {
+          setHasTorch(true);
+        } else {
+          setHasTorch(false);
+        }
+
+        if (capabilities.zoom) {
+          setHasHardwareZoom(true);
+          if (zoomLevel > 1) {
+            try {
+              await track.applyConstraints({
+                advanced: [{ zoom: zoomLevel } as any]
+              });
+            } catch {
+              // ignore
+            }
+          }
+        } else {
+          setHasHardwareZoom(false);
+        }
+
+        if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+          try {
+            await track.applyConstraints({
+              advanced: [{ focusMode: 'continuous' } as any]
+            });
+          } catch {
+            // ignore
+          }
+        }
+      }
     } catch (err: any) {
       console.error(err);
       setIsCameraActive(false);
       setErrorMessage(
-        'Não foi possível abrir a câmera ao vivo. Você pode selecionar uma foto da galeria ou arquivo.'
+        'Não foi possível abrir a câmera ao vivo. Você pode tirar uma foto com a câmera nativa do celular ou selecionar uma foto da galeria.'
       );
     }
   };
@@ -137,12 +262,25 @@ export function ReceiptOcrModal({
     try {
       const video = videoRef.current;
       const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
+      const vWidth = video.videoWidth || 1920;
+      const vHeight = video.videoHeight || 1080;
+
+      canvas.width = vWidth;
+      canvas.height = vHeight;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        if (!hasHardwareZoom && zoomLevel > 1) {
+          // Crop digital zoom to match user's viewfinder preview
+          const sx = (vWidth * (1 - 1 / zoomLevel)) / 2;
+          const sy = (vHeight * (1 - 1 / zoomLevel)) / 2;
+          const sWidth = vWidth / zoomLevel;
+          const sHeight = vHeight / zoomLevel;
+          ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+        } else {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        }
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
         stopCamera();
         setImagePreview(dataUrl);
         processReceiptImage(dataUrl);
@@ -346,79 +484,180 @@ export function ReceiptOcrModal({
           <div className="p-4 sm:p-6 overflow-y-auto space-y-5">
             {/* Live Camera View */}
             {isCameraActive ? (
-              <div className="relative bg-black rounded-3xl overflow-hidden aspect-4/3 sm:aspect-16/9 flex items-center justify-center shadow-inner">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover"
-                />
+              <div className="space-y-3">
+                <div 
+                  onClick={handleTapToFocus}
+                  className="relative bg-black rounded-3xl overflow-hidden aspect-[4/3] sm:aspect-[16/9] flex items-center justify-center shadow-inner cursor-pointer select-none"
+                >
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
 
-                {/* Camera Guide Overlay */}
-                <div className="absolute inset-4 border-2 border-dashed border-white/60 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
-                  <span className="text-[11px] font-bold text-white bg-black/60 px-2.5 py-1 rounded-full self-start">
-                    Posicione o cupom fiscal bem alinhado
-                  </span>
-                  <span className="text-[10px] text-white/80 bg-black/60 px-2.5 py-1 rounded-full self-center">
-                    Evite sombras e reflexos no papel térmico
-                  </span>
+                  {/* Tap to Focus Ring Animation */}
+                  {focusRing && (
+                    <div 
+                      className="absolute pointer-events-none w-14 h-14 -translate-x-1/2 -translate-y-1/2 border-2 border-amber-400 rounded-full animate-ping z-20"
+                      style={{ left: focusRing.x, top: focusRing.y }}
+                    />
+                  )}
+
+                  {/* Top Floating Controls: Zoom Selector & Torch */}
+                  <div className="absolute top-3 inset-x-3 z-10 flex items-center justify-between pointer-events-auto">
+                    {/* Zoom Selector */}
+                    <div className="flex items-center gap-1 bg-black/65 backdrop-blur-md p-1 rounded-2xl border border-white/15 shadow-lg">
+                      <span className="text-[10px] font-black uppercase text-neutral-400 pl-1.5 pr-0.5">
+                        Zoom
+                      </span>
+                      {[1, 1.5, 2, 2.5].map((z) => (
+                        <button
+                          key={z}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleZoomChange(z);
+                          }}
+                          className={`px-2.5 py-1 rounded-xl text-xs font-black transition-all ${
+                            zoomLevel === z
+                              ? 'bg-emerald-500 text-white shadow-md scale-105'
+                              : 'text-white/80 hover:text-white hover:bg-white/10'
+                          }`}
+                        >
+                          {z}x
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Torch Toggle */}
+                    {hasTorch && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleTorch();
+                        }}
+                        className={`p-2.5 rounded-2xl transition-all shadow-md ${
+                          torchOn
+                            ? 'bg-amber-400 text-neutral-900 shadow-amber-400/50 scale-105'
+                            : 'bg-black/65 backdrop-blur-md text-white border border-white/15 hover:bg-black/80'
+                        }`}
+                        title="Ligar/Desligar Lanterna"
+                      >
+                        <Flashlight size={16} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Camera Guide Overlay */}
+                  <div className="absolute inset-4 border-2 border-dashed border-white/50 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
+                    <span className="text-[11px] font-bold text-white bg-black/65 backdrop-blur-xs px-3 py-1 rounded-full self-start border border-white/10">
+                      Enquadre os itens e preços do cupom
+                    </span>
+                    <span className="text-[10px] text-white/90 bg-black/65 backdrop-blur-xs px-3 py-1 rounded-full self-center border border-white/10">
+                      Distância ideal 20 a 35 cm • Toque na tela para focar
+                    </span>
+                  </div>
+
+                  {/* Capture Floating Action Bar */}
+                  <div className="absolute bottom-4 inset-x-4 flex items-center justify-between gap-3 pointer-events-auto z-10">
+                    <button
+                      type="button"
+                      onClick={stopCamera}
+                      className="px-4 py-2 bg-neutral-900/80 backdrop-blur-xs text-white rounded-xl text-xs font-bold hover:bg-neutral-900 transition-all border border-white/10"
+                    >
+                      Fechar Câmera
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCapturePhoto}
+                      className="h-14 w-14 rounded-full bg-white text-emerald-600 shadow-xl flex items-center justify-center border-4 border-emerald-500 hover:scale-105 active:scale-95 transition-all"
+                      title="Fotografar Cupom"
+                    >
+                      <Camera size={26} />
+                    </button>
+
+                    <div className="w-20" />
+                  </div>
                 </div>
 
-                {/* Capture Floating Action Bar */}
-                <div className="absolute bottom-4 inset-x-4 flex items-center justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={stopCamera}
-                    className="px-4 py-2 bg-neutral-900/80 backdrop-blur-xs text-white rounded-xl text-xs font-bold hover:bg-neutral-900 transition-all"
-                  >
-                    Fechar Câmera
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleCapturePhoto}
-                    className="h-14 w-14 rounded-full bg-white text-emerald-600 shadow-xl flex items-center justify-center border-4 border-emerald-500 hover:scale-105 active:scale-95 transition-all"
-                    title="Fotografar Cupom"
-                  >
-                    <Camera size={26} />
-                  </button>
-
-                  <div className="w-20" />
+                {/* Macro Focus Guidance Note */}
+                <div className="p-3 bg-emerald-50/80 border border-emerald-200/80 rounded-2xl text-xs text-emerald-950 flex items-start gap-2.5">
+                  <Info size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5 leading-relaxed text-justify">
+                    <p className="text-[11px] font-bold text-emerald-900">
+                      💡 Dica de Foco & Macro para Cupons Fiscais:
+                    </p>
+                    <p className="text-[11px] text-emerald-800">
+                      As letras miúdas de notas fiscais costumam borrar se a lente aproximar demais. <strong>Mantenha o celular afastado (20 a 35 cm)</strong> e toque no botão <strong>1.5x</strong> ou <strong>2x</strong> acima. A imagem capturada será nítida e a leitura dos preços e produtos será imediata!
+                    </p>
+                  </div>
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Option 1: Live Camera */}
-                <div className="p-6 rounded-3xl bg-neutral-50 border-2 border-dashed border-neutral-200 hover:border-emerald-500 text-center flex flex-col items-center justify-center gap-3 transition-all group">
-                  <div className="p-4 bg-emerald-100 text-emerald-700 rounded-2xl group-hover:scale-110 transition-transform">
-                    <Camera size={32} />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                {/* Option 1: Live Camera with Zoom */}
+                <div className="p-5 rounded-3xl bg-neutral-50 border-2 border-dashed border-neutral-200 hover:border-emerald-500 text-center flex flex-col items-center justify-between gap-3 transition-all group">
+                  <div className="p-3.5 bg-emerald-100 text-emerald-700 rounded-2xl group-hover:scale-110 transition-transform">
+                    <Camera size={28} />
                   </div>
                   <div>
-                    <h3 className="font-black text-sm text-neutral-900">Tirar Foto do Cupom</h3>
-                    <p className="text-xs text-neutral-500 mt-1 max-w-xs">
-                      Abre a câmera do smartphone para enquadrar a nota fiscal impressa.
+                    <h3 className="font-black text-sm text-neutral-900">Câmera ao Vivo</h3>
+                    <p className="text-[11px] text-neutral-500 mt-1">
+                      Visor interativo com zoom 1.5x / 2x, foco por toque e lanterna.
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={startCamera}
-                    className="mt-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center gap-1.5"
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5"
                   >
                     <Camera size={14} />
                     <span>Abrir Câmera</span>
                   </button>
                 </div>
 
-                {/* Option 2: Upload from Gallery / Files */}
-                <div className="p-6 rounded-3xl bg-neutral-50 border-2 border-dashed border-neutral-200 hover:border-sky-500 text-center flex flex-col items-center justify-center gap-3 transition-all group">
-                  <div className="p-4 bg-sky-100 text-sky-700 rounded-2xl group-hover:scale-110 transition-transform">
-                    <ImageIcon size={32} />
+                {/* Option 2: Native Smartphone Camera (Full HD / 4K) */}
+                <div className="p-5 rounded-3xl bg-neutral-50 border-2 border-dashed border-neutral-200 hover:border-purple-500 text-center flex flex-col items-center justify-between gap-3 transition-all group">
+                  <div className="p-3.5 bg-purple-100 text-purple-700 rounded-2xl group-hover:scale-110 transition-transform">
+                    <Smartphone size={28} />
                   </div>
                   <div>
-                    <h3 className="font-black text-sm text-neutral-900">Escolher Foto da Galeria</h3>
-                    <p className="text-xs text-neutral-500 mt-1 max-w-xs">
-                      Selecione uma imagem já salva no seu celular ou arquivo JPEG/PNG.
+                    <h3 className="font-black text-sm text-neutral-900">Câmera do Celular</h3>
+                    <p className="text-[11px] text-neutral-500 mt-1">
+                      Usa o app nativo do seu aparelho com alta resolução e foco automático.
+                    </p>
+                  </div>
+                  <input
+                    ref={cameraCaptureInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => cameraCaptureInputRef.current?.click()}
+                    className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 active:scale-95 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Smartphone size={14} />
+                    <span>Tirar Foto HD</span>
+                  </button>
+                </div>
+
+                {/* Option 3: Upload from Gallery / Files */}
+                <div className="p-5 rounded-3xl bg-neutral-50 border-2 border-dashed border-neutral-200 hover:border-sky-500 text-center flex flex-col items-center justify-between gap-3 transition-all group">
+                  <div className="p-3.5 bg-sky-100 text-sky-700 rounded-2xl group-hover:scale-110 transition-transform">
+                    <ImageIcon size={28} />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-neutral-900">Galeria de Fotos</h3>
+                    <p className="text-[11px] text-neutral-500 mt-1">
+                      Envie uma foto ou comprovante já salvo no seu aparelho.
                     </p>
                   </div>
                   <input
@@ -431,10 +670,10 @@ export function ReceiptOcrModal({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="mt-2 px-5 py-2.5 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center gap-1.5"
+                    className="w-full py-2.5 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5"
                   >
                     <ImageIcon size={14} />
-                    <span>Selecionar Imagem</span>
+                    <span>Abrir Galeria</span>
                   </button>
                 </div>
               </div>

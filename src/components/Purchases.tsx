@@ -732,6 +732,9 @@ export function Purchases({
     suggestedBrand?: string;
     suggestedCategory?: string;
     suggestedUnit?: string;
+    existingProduct?: Product;
+    isExistingInCatalog?: boolean;
+    source?: string;
   }) => {
     if (!activePurchase) return;
 
@@ -754,8 +757,8 @@ export function Purchases({
       return;
     }
 
-    // 2. Check if product exists in catalog
-    const existingProduct = products.find(p => p.barcode === data.barcode);
+    // 2. Check if product exists in catalog (or was found in user catalog)
+    const existingProduct = data.existingProduct || products.find(p => p.barcode === data.barcode);
     if (existingProduct) {
       const cat = categories.find(c => c.id === existingProduct.categoryId);
       await addPurchaseItem(activePurchase.id, {
@@ -2197,6 +2200,8 @@ export function Purchases({
         isOpen={isPurchaseBarcodeScannerOpen}
         onClose={() => setIsPurchaseBarcodeScannerOpen(false)}
         onDetected={handlePurchaseBarcodeDetected}
+        userProducts={products}
+        categories={categories}
         title="Escanear Produto para a Compra"
       />
 

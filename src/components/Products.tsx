@@ -229,13 +229,16 @@ export function Products({
     suggestedBrand?: string;
     suggestedCategory?: string;
     suggestedUnit?: string;
+    existingProduct?: Product;
+    isExistingInCatalog?: boolean;
+    source?: string;
   }) => {
     // 1. Check if product already exists
-    const existing = products.find(p => p.barcode === data.barcode);
+    const existing = data.existingProduct || products.find(p => p.barcode === data.barcode);
     if (existing) {
       startEditProduct(existing);
       showBannerTimed(
-        `Produto encontrado pelo código de barras: "${existing.name}". Formulário aberto para edição.`
+        `Produto encontrado no seu catálogo: "${existing.name}". Formulário aberto para edição.`
       );
       return;
     }
@@ -264,9 +267,9 @@ export function Products({
     setShowProductForm(true);
     setProductError(null);
     showBannerTimed(
-      `Código de barras ${data.barcode} lido com sucesso! ${
-        data.suggestedName ? 'Dados pré-preenchidos automaticamente.' : 'Preencha os detalhes do produto.'
-      }`
+      data.source 
+        ? `Código ${data.barcode} lido (${data.source})! Preencha ou revise os detalhes e salve.`
+        : `Código de barras ${data.barcode} lido! Preencha os detalhes e salve.`
     );
   };
 
@@ -417,6 +420,8 @@ export function Products({
         isOpen={isScannerOpen}
         onClose={() => setIsScannerOpen(false)}
         onDetected={handleBarcodeDetected}
+        userProducts={products}
+        categories={categories}
         title="Cadastrar / Identificar Produto"
       />
 

@@ -3,10 +3,16 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { 
   Camera, X, Flashlight, RefreshCw, Upload, CheckCircle2, 
   AlertCircle, Sparkles, Loader2, Barcode as BarcodeIcon, Search,
-  Image as ImageIcon, Smartphone, Edit3
+  Image as ImageIcon, Smartphone, Edit3, Database, Zap, WifiOff, Globe, Info
 } from 'lucide-react';
-import { normalizeProductUnit, getUnitLabel } from '../utils/units';
+import { normalizeProductUnit, getUnitLabel, PRODUCT_UNITS } from '../utils/units';
 import { normalizeBrand, formatBrandDisplay } from '../utils/brand';
+import { 
+  lookupBarcodeWithHierarchy, 
+  learnBarcode, 
+  BarcodeLookupResult 
+} from '../utils/offlineBarcodeCatalog';
+import { Product, Category } from '../types';
 
 interface BarcodeScannerModalProps {
   isOpen: boolean;
@@ -17,7 +23,12 @@ interface BarcodeScannerModalProps {
     suggestedBrand?: string;
     suggestedCategory?: string;
     suggestedUnit?: string;
+    existingProduct?: Product;
+    isExistingInCatalog?: boolean;
+    source?: string;
   }) => void;
+  userProducts?: Product[];
+  categories?: Category[];
   title?: string;
 }
 
@@ -25,6 +36,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   isOpen,
   onClose,
   onDetected,
+  userProducts = [],
+  categories = [],
   title = 'Ler Código de Barras'
 }) => {
   const [activeTab, setActiveTab] = useState<'camera' | 'gallery' | 'manual'>('camera');
@@ -35,19 +48,24 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [isDecodingFile, setIsDecodingFile] = useState(false);
   const [fileDecodeError, setFileDecodeError] = useState<string | null>(null);
-  const [detectedResult, setDetectedResult] = useState<{
-    barcode: string;
-    name?: string;
-    brand?: string;
-    category?: string;
-    unit?: string;
-    found?: boolean;
-    source?: string;
-  } | null>(null);
+  const [lookupResult, setLookupResult] = useState<BarcodeLookupResult | null>(null);
+
+  // Manual fast-registration fields when item is not in any database
+  const [manualName, setManualName] = useState('');
+  const [manualBrand, setManualBrand] = useState('');
+  const [manualCategory, setManualCategory] = useState('');
+  const [manualUnit, setManualUnit] = useState('Un');
+
+  // Zoom & Focus enhancements for multi-distance scanning
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [hasHardwareZoom, setHasHardwareZoom] = useState(false);
+  const [focusRing, setFocusRing] = useState<{ x: number; y: number } | null>(null);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraCaptureInputRef = useRef<HTMLInputElement>(null);
+  const stopScanningLoopRef = useRef(false);
+  const animationFrameRef = useRef<number | null>(null);
   const readerElementId = 'barcode-reader-viewport';
 
   // Sound beep & haptic feedback on scan
@@ -77,37 +95,38 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     }
   };
 
+  /**
+   * Executes the exact 3-step hierarchy:
+   * 1. Check user personal catalog
+   * 2. Check offline built-in 11,000+ database & learned device memory
+   * 3. Check online API (Open Food Facts / cloud)
+   */
   const lookupBarcode = async (rawCode: string) => {
     const clean = rawCode.trim().replace(/\D/g, '').slice(0, 14);
     if (!clean) return;
 
     setIsLookingUp(true);
-    setDetectedResult({ barcode: clean, found: undefined });
+    setLookupResult(null);
 
     try {
-      const res = await fetch(`/api/barcode/lookup?code=${encodeURIComponent(clean)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setDetectedResult({
-          barcode: clean,
-          name: data.name || '',
-          brand: normalizeBrand(data.brand),
-          category: data.categorySuggestion || '',
-          unit: data.unit || 'Unidade',
-          found: Boolean(data.found),
-          source: data.databaseSource || undefined
-        });
-      } else {
-        setDetectedResult({
-          barcode: clean,
-          found: false
-        });
+      const result = await lookupBarcodeWithHierarchy(clean, userProducts, categories);
+      setLookupResult(result);
+
+      // If not found, prefill default category/unit for quick entry
+      if (!result.found) {
+        setManualName('');
+        setManualBrand('');
+        setManualCategory(categories[0]?.name || 'Mercearia');
+        setManualUnit('Un');
       }
     } catch (e) {
       console.warn('Erro ao consultar código de barras:', e);
-      setDetectedResult({
+      setLookupResult({
         barcode: clean,
-        found: false
+        found: false,
+        source: 'none',
+        sourceBadge: 'Erro de Consulta',
+        sourceDescription: 'Ocorreu uma falha ao consultar o código.'
       });
     } finally {
       setIsLookingUp(false);
@@ -121,6 +140,11 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   };
 
   const stopCamera = async () => {
+    stopScanningLoopRef.current = true;
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
     if (scannerRef.current) {
       try {
         if (scannerRef.current.isScanning) {
@@ -133,10 +157,57 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       scannerRef.current = null;
     }
     setIsScanning(false);
+    setTorchOn(false);
+  };
+
+  const handleZoomChange = async (targetZoom: number) => {
+    setZoomLevel(targetZoom);
+
+    // 1. Hardware Zoom on Camera Track (if supported by device)
+    if (scannerRef.current && hasHardwareZoom) {
+      try {
+        await scannerRef.current.applyVideoConstraints({
+          advanced: [{ zoom: targetZoom } as any]
+        });
+        return;
+      } catch (e) {
+        console.warn('Hardware zoom falhou, usando zoom digital:', e);
+      }
+    }
+
+    // 2. Digital CSS Zoom fallback on video element
+    const video = document.querySelector(`#${readerElementId} video`) as HTMLVideoElement;
+    if (video) {
+      video.style.transform = targetZoom > 1 ? `scale(${targetZoom})` : 'none';
+      video.style.transformOrigin = 'center center';
+      video.style.transition = 'transform 0.2s ease-out';
+    }
+  };
+
+  const handleTapToFocus = async (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setFocusRing({ x, y });
+    setTimeout(() => setFocusRing(null), 1200);
+
+    if (scannerRef.current) {
+      try {
+        await scannerRef.current.applyVideoConstraints({
+          advanced: [
+            { focusMode: 'continuous' } as any,
+            { exposureMode: 'continuous' } as any
+          ]
+        });
+      } catch {
+        // ignore
+      }
+    }
   };
 
   const startCamera = async () => {
     setIsScanning(true);
+    stopScanningLoopRef.current = false;
 
     try {
       if (scannerRef.current) {
@@ -157,36 +228,142 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           Html5QrcodeSupportedFormats.CODE_39,
           Html5QrcodeSupportedFormats.QR_CODE
         ],
-        verbose: false
+        verbose: false,
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true
+        }
       });
       scannerRef.current = html5QrCode;
 
+      // Full-viewfinder decoding! No artificial 280x160 cropping!
+      // This allows scanning anywhere across the entire camera view at any distance.
       const config = {
-        fps: 15,
-        qrbox: { width: 280, height: 160 },
-        aspectRatio: 1.333333
+        fps: 20,
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          return {
+            width: Math.max(260, Math.floor(viewfinderWidth * 0.96)),
+            height: Math.max(180, Math.floor(viewfinderHeight * 0.92))
+          };
+        },
+        aspectRatio: 1.333333,
+        disableFlip: true
       };
 
-      await html5QrCode.start(
-        { facingMode: 'environment' },
-        config,
-        (decodedText) => {
-          handleScanSuccess(decodedText);
+      // Camera constraints: Request HD resolution & continuous autofocus
+      // HD resolution allows barcode bars to be sharp even from 20-30cm away!
+      const cameraCandidates = [
+        {
+          facingMode: 'environment',
+          width: { min: 1280, ideal: 1920, max: 2560 },
+          height: { min: 720, ideal: 1080, max: 1440 },
+          focusMode: 'continuous'
         },
-        undefined
-      );
+        {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          focusMode: 'continuous'
+        },
+        { facingMode: 'environment' }
+      ];
 
-      // Check flashlight capability
+      let started = false;
+      for (const camConfig of cameraCandidates) {
+        try {
+          await html5QrCode.start(
+            camConfig as any,
+            config,
+            (decodedText) => {
+              handleScanSuccess(decodedText);
+            },
+            undefined
+          );
+          started = true;
+          break;
+        } catch (err) {
+          console.warn('Configuração de câmera tentada falhou, tentando fallback:', err);
+        }
+      }
+
+      if (!started) {
+        setIsScanning(false);
+        return;
+      }
+
+      // Check capabilities (Torch & Hardware Zoom)
       try {
-        const capabilities = html5QrCode.getRunningTrackCapabilities();
-        if (capabilities && (capabilities as any).torch) {
-          setHasTorch(true);
+        const capabilities = html5QrCode.getRunningTrackCapabilities() as any;
+        if (capabilities) {
+          if (capabilities.torch) {
+            setHasTorch(true);
+          }
+          if (capabilities.zoom) {
+            setHasHardwareZoom(true);
+            // If user has zoom > 1, apply it
+            if (zoomLevel > 1) {
+              await html5QrCode.applyVideoConstraints({
+                advanced: [{ zoom: zoomLevel } as any]
+              });
+            }
+          } else {
+            setHasHardwareZoom(false);
+          }
+
+          // Trigger continuous autofocus
+          if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+            await html5QrCode.applyVideoConstraints({
+              advanced: [{ focusMode: 'continuous' } as any]
+            });
+          }
         }
       } catch {
         setHasTorch(false);
+        setHasHardwareZoom(false);
+      }
+
+      // Check for native BarcodeDetector API (Hardware-Accelerated ML on Android Chrome / WebView)
+      // This detects barcodes at any angle, anywhere on screen, even with slight motion
+      if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+        try {
+          const supported = await (window as any).BarcodeDetector.getSupportedFormats();
+          const targetFormats = [
+            'ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'
+          ].filter((f: string) => supported.includes(f));
+
+          if (targetFormats.length > 0) {
+            const nativeDetector = new (window as any).BarcodeDetector({ formats: targetFormats });
+
+            const scanNativeLoop = async () => {
+              if (stopScanningLoopRef.current) return;
+              try {
+                const videoEl = document.querySelector(`#${readerElementId} video`) as HTMLVideoElement;
+                if (videoEl && videoEl.readyState >= 2 && !videoEl.paused && !videoEl.ended) {
+                  const barcodes = await nativeDetector.detect(videoEl);
+                  if (barcodes && barcodes.length > 0 && barcodes[0]?.rawValue) {
+                    if (!stopScanningLoopRef.current) {
+                      stopScanningLoopRef.current = true;
+                      handleScanSuccess(barcodes[0].rawValue);
+                      return;
+                    }
+                  }
+                }
+              } catch {
+                // ignore transient frame decode error
+              }
+
+              if (!stopScanningLoopRef.current) {
+                animationFrameRef.current = requestAnimationFrame(scanNativeLoop);
+              }
+            };
+
+            animationFrameRef.current = requestAnimationFrame(scanNativeLoop);
+          }
+        } catch (detectorErr) {
+          console.info('BarcodeDetector nativo não pôde ser ativado:', detectorErr);
+        }
       }
     } catch (err: any) {
-      // Quiet failover: do not show permission error popups or banners
+      console.warn('Erro ao iniciar câmera:', err);
       setIsScanning(false);
     }
   };
@@ -204,11 +381,35 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     }
   };
 
-  // Process image from smartphone gallery or photo file
+  // Process image from smartphone gallery or photo file with dual-engine (BarcodeDetector + ZXing)
   const handleProcessImageFile = async (file: File) => {
     setIsDecodingFile(true);
     setFileDecodeError(null);
     try {
+      // Step 1: Try Native BarcodeDetector (fastest and handles high-res 48MP photos seamlessly)
+      if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+        try {
+          const supportedFormats = await (window as any).BarcodeDetector.getSupportedFormats();
+          const formatsToUse = [
+            'ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'
+          ].filter((f: string) => supportedFormats.includes(f));
+
+          if (formatsToUse.length > 0) {
+            const nativeDetector = new (window as any).BarcodeDetector({ formats: formatsToUse });
+            const bitmap = await createImageBitmap(file);
+            const detected = await nativeDetector.detect(bitmap);
+            if (detected && detected.length > 0 && detected[0]?.rawValue) {
+              playBeep();
+              await lookupBarcode(detected[0].rawValue);
+              return;
+            }
+          }
+        } catch (nativeErr) {
+          console.warn('Falha no BarcodeDetector ao analisar foto, tentando ZXing:', nativeErr);
+        }
+      }
+
+      // Step 2: Try Html5Qrcode scanFile
       const html5QrCode = new Html5Qrcode('barcode-file-hidden-canvas', {
         formatsToSupport: [
           Html5QrcodeSupportedFormats.EAN_13,
@@ -224,7 +425,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       playBeep();
       await lookupBarcode(decodedText);
     } catch (err) {
-      setFileDecodeError('Nenhum código de barras legível foi encontrado nesta foto. Tente uma foto mais nítida com boa iluminação ou digite os números.');
+      setFileDecodeError(
+        'Nenhum código de barras legível foi encontrado nesta foto. Mantenha a câmera a cerca de 15 a 25 cm para foco nítido ou digite os números do código.'
+      );
     } finally {
       setIsDecodingFile(false);
     }
@@ -238,29 +441,61 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   };
 
   const confirmApply = () => {
-    if (!detectedResult?.barcode) return;
+    if (!lookupResult?.barcode) return;
     onDetected({
-      barcode: detectedResult.barcode,
-      suggestedName: detectedResult.name,
-      suggestedBrand: normalizeBrand(detectedResult.brand),
-      suggestedCategory: detectedResult.category,
-      suggestedUnit: normalizeProductUnit(detectedResult.unit)
+      barcode: lookupResult.barcode,
+      suggestedName: lookupResult.name,
+      suggestedBrand: normalizeBrand(lookupResult.brand),
+      suggestedCategory: lookupResult.category,
+      suggestedUnit: normalizeProductUnit(lookupResult.unit),
+      existingProduct: lookupResult.existingProduct,
+      isExistingInCatalog: Boolean(lookupResult.isUserCatalogProduct),
+      source: lookupResult.sourceBadge
+    });
+    onClose();
+  };
+
+  // Quick-save manual product and learn for future offline scans
+  const handleSaveManualItem = () => {
+    if (!lookupResult?.barcode) return;
+    const finalName = manualName.trim() || `Produto ${lookupResult.barcode}`;
+    const finalBrand = normalizeBrand(manualBrand);
+    const finalCategory = manualCategory || (categories[0]?.name || 'Mercearia');
+    const finalUnit = normalizeProductUnit(manualUnit);
+
+    // Save to device local memory so it learns with use!
+    learnBarcode({
+      barcode: lookupResult.barcode,
+      name: finalName,
+      brand: finalBrand,
+      category: finalCategory,
+      unit: finalUnit
+    });
+
+    onDetected({
+      barcode: lookupResult.barcode,
+      suggestedName: finalName,
+      suggestedBrand: finalBrand,
+      suggestedCategory: finalCategory,
+      suggestedUnit: finalUnit,
+      isExistingInCatalog: false,
+      source: 'Memória Local do Aparelho'
     });
     onClose();
   };
 
   // Switch to manual edit mode with current barcode
   const handleReviewAndType = () => {
-    if (detectedResult?.barcode) {
-      setManualCode(detectedResult.barcode);
+    if (lookupResult?.barcode) {
+      setManualCode(lookupResult.barcode);
     }
-    setDetectedResult(null);
+    setLookupResult(null);
     setActiveTab('manual');
   };
 
   useEffect(() => {
     if (isOpen) {
-      setDetectedResult(null);
+      setLookupResult(null);
       setFileDecodeError(null);
       setManualCode('');
       setActiveTab('camera');
@@ -292,7 +527,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             <div>
               <h3 className="font-black text-base text-neutral-900 leading-tight">{title}</h3>
               <p className="text-xs text-neutral-500 font-medium">
-                Câmera nativa, galeria de fotos ou digitação direta
+                Base nativa de 11.000+ produtos offline & consulta instantânea
               </p>
             </div>
           </div>
@@ -309,7 +544,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         </div>
 
         {/* Tab Selector */}
-        {!detectedResult && (
+        {!lookupResult && (
           <div className="flex border-b border-neutral-200 bg-neutral-50/70 p-1.5 gap-1 text-xs font-bold">
             <button
               type="button"
@@ -351,37 +586,69 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               }}
               className={`flex-1 py-2.5 px-2 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
                 activeTab === 'manual'
-                  ? 'bg-white text-sky-600 shadow-sm border border-neutral-200/80 font-black'
+                  ? 'bg-white text-amber-600 shadow-sm border border-neutral-200/80 font-black'
                   : 'text-neutral-500 hover:text-neutral-900 hover:bg-white/50'
               }`}
             >
-              <BarcodeIcon size={15} />
-              <span>Digitar</span>
+              <Search size={15} />
+              <span>Digitar Código</span>
             </button>
           </div>
         )}
 
         {/* Content Body */}
         <div className="p-4 sm:p-6 overflow-y-auto flex-1 flex flex-col justify-center bg-white">
-          {detectedResult ? (
+          {lookupResult ? (
             /* Result Confirmation Card */
             <div className="space-y-4 animate-in zoom-in-95 duration-200">
-              {detectedResult.found ? (
-                /* Found in Open Food Facts */
+              {lookupResult.found ? (
+                /* Found (User Catalog OR Offline Built-In OR Learned OR Online API) */
                 <>
-                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start gap-3">
-                    <CheckCircle2 size={24} className="text-emerald-600 shrink-0 mt-0.5" />
+                  <div className={`p-4 rounded-2xl flex items-start gap-3 border ${
+                    lookupResult.isUserCatalogProduct 
+                      ? 'bg-sky-50 border-sky-200' 
+                      : lookupResult.source === 'built_in_offline'
+                      ? 'bg-emerald-50 border-emerald-200'
+                      : lookupResult.source === 'learned_offline'
+                      ? 'bg-teal-50 border-teal-200'
+                      : 'bg-indigo-50 border-indigo-200'
+                  }`}>
+                    {lookupResult.isUserCatalogProduct ? (
+                      <CheckCircle2 size={24} className="text-sky-600 shrink-0 mt-0.5" />
+                    ) : lookupResult.source === 'built_in_offline' ? (
+                      <Zap size={24} className="text-emerald-600 shrink-0 mt-0.5" />
+                    ) : lookupResult.source === 'learned_offline' ? (
+                      <Database size={24} className="text-teal-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <Globe size={24} className="text-indigo-600 shrink-0 mt-0.5" />
+                    )}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700">
-                          Código Identificado
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`text-[10px] font-black uppercase tracking-wider ${
+                          lookupResult.isUserCatalogProduct ? 'text-sky-700' : 'text-emerald-700'
+                        }`}>
+                          Código Reconhecido
                         </span>
-                        <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-200 text-emerald-800 rounded-full flex items-center gap-1">
-                          <Sparkles size={10} /> {detectedResult.source || 'Base Oficial de Produtos'}
+                        <span className={`px-2 py-0.5 text-[10px] font-black rounded-full flex items-center gap-1 ${
+                          lookupResult.isUserCatalogProduct
+                            ? 'bg-sky-200 text-sky-800'
+                            : lookupResult.source === 'built_in_offline'
+                            ? 'bg-emerald-200 text-emerald-800'
+                            : lookupResult.source === 'learned_offline'
+                            ? 'bg-teal-200 text-teal-800'
+                            : 'bg-indigo-200 text-indigo-800'
+                        }`}>
+                          {lookupResult.source === 'built_in_offline' && <Zap size={10} />}
+                          {lookupResult.source === 'learned_offline' && <Database size={10} />}
+                          {lookupResult.source === 'online_api' && <Globe size={10} />}
+                          {lookupResult.sourceBadge}
                         </span>
                       </div>
                       <p className="font-mono text-xl font-black text-neutral-950 mt-1">
-                        {detectedResult.barcode}
+                        {lookupResult.barcode}
+                      </p>
+                      <p className="text-xs text-neutral-600 mt-0.5">
+                        {lookupResult.sourceDescription}
                       </p>
                     </div>
                   </div>
@@ -394,13 +661,13 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   ) : (
                     <div className="bg-neutral-50 p-4 rounded-2xl border border-neutral-200 space-y-3">
                       <div className="text-[11px] font-bold text-neutral-400 uppercase tracking-wider">
-                        Dados Sugeridos para Preenchimento
+                        Dados Identificados
                       </div>
 
                       <div>
                         <label className="text-[11px] font-semibold text-neutral-500">Nome do Produto</label>
                         <p className="font-bold text-neutral-900 text-sm">
-                          {detectedResult.name || '(Definir nome no formulário)'}
+                          {lookupResult.name || '(Definir nome)'}
                         </p>
                       </div>
 
@@ -408,19 +675,19 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                         <div>
                           <label className="text-[10px] font-semibold text-neutral-400">Marca</label>
                           <p className="text-xs font-bold text-neutral-800 truncate">
-                            {formatBrandDisplay(detectedResult.brand) || 'Não informada (opcional)'}
+                            {formatBrandDisplay(lookupResult.brand) || 'Sem marca'}
                           </p>
                         </div>
                         <div>
                           <label className="text-[10px] font-semibold text-neutral-400">Categoria</label>
                           <p className="text-xs font-bold text-sky-600 truncate">
-                            {detectedResult.category || 'Geral'}
+                            {lookupResult.category || 'Geral'}
                           </p>
                         </div>
                         <div>
                           <label className="text-[10px] font-semibold text-neutral-400">Unidade</label>
                           <p className="text-xs font-bold text-neutral-800">
-                            {getUnitLabel(detectedResult.unit)}
+                            {getUnitLabel(lookupResult.unit)}
                           </p>
                         </div>
                       </div>
@@ -431,7 +698,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        setDetectedResult(null);
+                        setLookupResult(null);
                         startCamera();
                       }}
                       className="w-full sm:flex-1 py-3 px-4 border border-neutral-200 rounded-2xl text-xs font-bold text-neutral-700 hover:bg-neutral-50 transition-colors flex items-center justify-center gap-1.5"
@@ -442,63 +709,134 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                     <button
                       type="button"
                       onClick={confirmApply}
-                      className="w-full sm:flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-2xl text-xs font-black transition-all shadow-sm flex items-center justify-center gap-1.5"
+                      className={`w-full sm:flex-1 py-3 px-4 active:scale-98 text-white rounded-2xl text-xs font-black transition-all shadow-sm flex items-center justify-center gap-1.5 ${
+                        lookupResult.isUserCatalogProduct 
+                          ? 'bg-sky-600 hover:bg-sky-700' 
+                          : 'bg-emerald-600 hover:bg-emerald-700'
+                      }`}
                     >
                       <CheckCircle2 size={16} />
-                      <span>Preencher Cadastro</span>
+                      <span>
+                        {lookupResult.isUserCatalogProduct ? 'Abrir / Adicionar' : 'Preencher Cadastro'}
+                      </span>
                     </button>
                   </div>
                 </>
               ) : (
-                /* NOT Found in Open Food Facts */
+                /* NOT Found anywhere -> Allow quick local registration with auto-learning */
                 <div className="space-y-4">
                   <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-2">
                     <div className="flex items-start gap-2.5">
                       <AlertCircle size={22} className="text-amber-600 shrink-0 mt-0.5" />
                       <div>
                         <h4 className="font-extrabold text-sm text-amber-900 leading-snug">
-                          Código não localizado nas bases de produtos
+                          Código não localizado nas bases
                         </h4>
                         <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                          O código <strong className="font-mono bg-amber-100/80 px-1 py-0.5 rounded text-amber-950">{detectedResult.barcode}</strong> não foi localizado nas bases integradas (Open Food Facts, Open Beauty & Products Facts).
+                          O código <strong className="font-mono bg-amber-100/80 px-1 py-0.5 rounded text-amber-950">{lookupResult.barcode}</strong> não consta na base offline nem na nuvem.
                         </p>
                       </div>
                     </div>
-                    <div className="p-2.5 bg-white/80 rounded-xl border border-amber-200/60 text-xs text-amber-950 font-medium leading-relaxed text-justify">
-                      💡 <strong>Dica:</strong> Sugerimos revisar os números impressos na embalagem e verificar se o código de barras foi digitado ou escaneado corretamente.
+                    <div className="p-2.5 bg-white/80 rounded-xl border border-amber-200/60 text-xs text-amber-950 font-medium leading-relaxed">
+                      💡 <strong>A Base aprende com o uso:</strong> Ao preencher os dados abaixo, esse produto fica gravado na memória do aparelho. Na próxima vez que for ao mercado, ele será reconhecido offline instantaneamente!
                     </div>
+                  </div>
+
+                  {/* Fast Registration Form inside modal */}
+                  <div className="bg-neutral-50 p-4 rounded-2xl border border-neutral-200 space-y-3 text-left">
+                    <div>
+                      <label className="text-[11px] font-bold text-neutral-700 block mb-1">
+                        Nome do Produto *
+                      </label>
+                      <input
+                        type="text"
+                        value={manualName}
+                        onChange={(e) => setManualName(e.target.value)}
+                        placeholder="Ex: Arroz Branco Tipo 1 5kg"
+                        className="w-full px-3 py-2 text-xs bg-white border border-neutral-300 rounded-xl focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[11px] font-bold text-neutral-700 block mb-1">
+                          Marca (opcional)
+                        </label>
+                        <input
+                          type="text"
+                          value={manualBrand}
+                          onChange={(e) => setManualBrand(e.target.value)}
+                          placeholder="Ex: Tio João"
+                          className="w-full px-3 py-2 text-xs bg-white border border-neutral-300 rounded-xl focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-neutral-700 block mb-1">
+                          Unidade
+                        </label>
+                        <select
+                          value={manualUnit}
+                          onChange={(e) => setManualUnit(e.target.value)}
+                          className="w-full px-2 py-2 text-xs bg-white border border-neutral-300 rounded-xl focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                        >
+                          {PRODUCT_UNITS.map(u => (
+                            <option key={u.value} value={u.value}>{u.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {categories.length > 0 && (
+                      <div>
+                        <label className="text-[11px] font-bold text-neutral-700 block mb-1">
+                          Categoria
+                        </label>
+                        <select
+                          value={manualCategory}
+                          onChange={(e) => setManualCategory(e.target.value)}
+                          className="w-full px-3 py-2 text-xs bg-white border border-neutral-300 rounded-xl focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                        >
+                          {categories.map(c => (
+                            <option key={c.id} value={c.name}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2 pt-1">
                     <button
                       type="button"
-                      onClick={handleReviewAndType}
-                      className="w-full py-3 px-4 bg-sky-500 hover:bg-sky-600 active:scale-98 text-white rounded-2xl text-xs font-black transition-all shadow-sm flex items-center justify-center gap-2"
+                      disabled={!manualName.trim()}
+                      onClick={handleSaveManualItem}
+                      className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-98 text-white rounded-2xl text-xs font-black transition-all shadow-sm flex items-center justify-center gap-2"
                     >
-                      <Edit3 size={15} />
-                      <span>Revisar e Digitar Novamente</span>
+                      <CheckCircle2 size={16} />
+                      <span>Salvar e Gravar na Memória do Aparelho</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={confirmApply}
-                      className="w-full py-3 px-4 bg-neutral-100 hover:bg-neutral-200 active:scale-98 text-neutral-800 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border border-neutral-200"
-                    >
-                      <CheckCircle2 size={15} className="text-emerald-600" />
-                      <span>O código está correto (Cadastrar Manualmente)</span>
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleReviewAndType}
+                        className="flex-1 py-2.5 px-3 bg-neutral-100 hover:bg-neutral-200 active:scale-98 text-neutral-800 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border border-neutral-200"
+                      >
+                        <Edit3 size={14} />
+                        <span>Revisar Código</span>
+                      </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDetectedResult(null);
-                        startCamera();
-                      }}
-                      className="w-full py-2.5 px-4 text-xs font-bold text-neutral-500 hover:text-neutral-800 transition-colors flex items-center justify-center gap-1.5"
-                    >
-                      <RefreshCw size={13} />
-                      <span>Ler Outro Código</span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLookupResult(null);
+                          startCamera();
+                        }}
+                        className="flex-1 py-2.5 px-3 text-xs font-bold text-neutral-600 hover:text-neutral-900 border border-neutral-200 rounded-2xl transition-colors flex items-center justify-center gap-1.5"
+                      >
+                        <RefreshCw size={13} />
+                        <span>Ler Outro</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -506,44 +844,108 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           ) : activeTab === 'camera' ? (
             /* Live Camera View */
             <div className="space-y-3">
-              <div className="relative rounded-2xl overflow-hidden bg-black aspect-[4/3] flex items-center justify-center shadow-inner">
+              <div 
+                onClick={handleTapToFocus}
+                className="relative rounded-2xl overflow-hidden bg-black aspect-[4/3] flex items-center justify-center shadow-inner cursor-pointer select-none"
+              >
                 <div id={readerElementId} className="w-full h-full object-cover" />
 
-                {/* Laser Scanning Overlay Animation */}
-                {isScanning && (
-                  <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-                    <div className="relative w-64 h-36 border-2 border-sky-400/90 rounded-2xl shadow-[0_0_15px_rgba(56,189,248,0.5)] flex items-center justify-center overflow-hidden">
-                      <div className="w-full h-0.5 bg-sky-400 shadow-[0_0_8px_#38bdf8] animate-pulse transition-all duration-1000" />
-                      {/* Corner markers */}
-                      <span className="absolute top-2 left-2 w-3 h-3 border-t-2 border-l-2 border-sky-400" />
-                      <span className="absolute top-2 right-2 w-3 h-3 border-t-2 border-r-2 border-sky-400" />
-                      <span className="absolute bottom-2 left-2 w-3 h-3 border-b-2 border-l-2 border-sky-400" />
-                      <span className="absolute bottom-2 right-2 w-3 h-3 border-b-2 border-r-2 border-sky-400" />
-                    </div>
-                    <span className="mt-3 px-3 py-1 bg-black/70 backdrop-blur-md rounded-full text-[11px] font-semibold text-sky-200">
-                      Aponte a câmera para o código de barras
-                    </span>
-                  </div>
+                {/* Tap to Focus Ring Animation */}
+                {focusRing && (
+                  <div 
+                    className="absolute pointer-events-none w-14 h-14 -translate-x-1/2 -translate-y-1/2 border-2 border-amber-400 rounded-full animate-ping z-20"
+                    style={{ left: focusRing.x, top: focusRing.y }}
+                  />
                 )}
 
-                {/* Torch Toggle */}
-                {hasTorch && (
-                  <button
-                    type="button"
-                    onClick={toggleTorch}
-                    className={`absolute top-3 right-3 p-2.5 rounded-full backdrop-blur-md border ${
-                      torchOn
-                        ? 'bg-amber-400 text-neutral-900 border-amber-300'
-                        : 'bg-black/40 text-white border-white/20'
-                    }`}
-                    title="Ligar/Desligar Lanterna"
-                  >
-                    <Flashlight size={16} />
-                  </button>
+                {/* Top Controls: Zoom Pills & Torch */}
+                <div className="absolute top-3 inset-x-3 z-10 flex items-center justify-between pointer-events-auto">
+                  {/* Zoom Selector */}
+                  <div className="flex items-center gap-1 bg-black/65 backdrop-blur-md p-1 rounded-2xl border border-white/15 shadow-lg">
+                    <span className="text-[10px] font-black uppercase text-neutral-400 pl-1.5 pr-0.5">
+                      Zoom
+                    </span>
+                    {[1, 1.5, 2, 2.5].map((z) => (
+                      <button
+                        key={z}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleZoomChange(z);
+                        }}
+                        className={`px-2.5 py-1 rounded-xl text-xs font-black transition-all ${
+                          zoomLevel === z
+                            ? 'bg-sky-500 text-white shadow-md scale-105'
+                            : 'text-white/80 hover:text-white hover:bg-white/10'
+                        }`}
+                      >
+                        {z}x
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Torch Toggle */}
+                  {hasTorch && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleTorch();
+                      }}
+                      className={`p-2.5 rounded-2xl transition-all shadow-md ${
+                        torchOn
+                          ? 'bg-amber-400 text-neutral-900 shadow-amber-400/50 scale-105'
+                          : 'bg-black/65 backdrop-blur-md text-white border border-white/15 hover:bg-black/80'
+                      }`}
+                      title="Ligar/Desligar Lanterna"
+                    >
+                      <Flashlight size={16} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Laser Scanning Overlay Animation - Responsive, Wide & Non-Restrictive */}
+                {isScanning && (
+                  <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-4">
+                    {/* Wide Viewfinder Box */}
+                    <div className="relative w-[88%] max-w-[340px] h-[58%] border-2 border-sky-400/70 rounded-3xl shadow-[0_0_20px_rgba(56,189,248,0.35)] flex items-center justify-center overflow-hidden bg-sky-500/5">
+                      {/* Laser red/cyan scan beam */}
+                      <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-sky-400 to-transparent shadow-[0_0_10px_#38bdf8] animate-pulse transition-all duration-1000" />
+                      
+                      {/* Corner markers */}
+                      <span className="absolute top-2.5 left-2.5 w-4 h-4 border-t-2 border-l-2 border-sky-300 rounded-tl-lg" />
+                      <span className="absolute top-2.5 right-2.5 w-4 h-4 border-t-2 border-r-2 border-sky-300 rounded-tr-lg" />
+                      <span className="absolute bottom-2.5 left-2.5 w-4 h-4 border-b-2 border-l-2 border-sky-300 rounded-bl-lg" />
+                      <span className="absolute bottom-2.5 right-2.5 w-4 h-4 border-b-2 border-r-2 border-sky-300 rounded-br-lg" />
+                    </div>
+
+                    {/* Bottom Guidance Toast */}
+                    <div className="mt-3 flex flex-col items-center gap-1">
+                      <p className="text-[11px] font-bold text-white drop-shadow bg-black/70 backdrop-blur-xs px-3.5 py-1.5 rounded-full flex items-center gap-1.5 border border-white/10">
+                        <span>Aponte para o código • Distância ideal 15 a 25 cm</span>
+                      </p>
+                      <span className="text-[10px] text-white/75 drop-shadow font-medium">
+                        Leitura em tela inteira • Não precisa centralizar
+                      </span>
+                    </div>
+                  </div>
                 )}
               </div>
 
-              {/* Direct Native Camera & Gallery Triggers (Native Mobile Direct Access) */}
+              {/* Distance & Macro Tip Card */}
+              <div className="p-3 bg-sky-50/80 border border-sky-200/80 rounded-2xl text-xs text-sky-950 flex items-start gap-2.5">
+                <Info size={16} className="text-sky-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 leading-relaxed text-justify">
+                  <p className="text-[11px] font-bold text-sky-900">
+                    💡 Dica para foco nítido e leitura rápida:
+                  </p>
+                  <p className="text-[11px] text-sky-800">
+                    Se a câmera do seu celular perder o foco ao aproximar demais, <strong>afaste um pouco (15 a 25 cm)</strong> e toque no botão <strong>1.5x</strong> ou <strong>2x</strong> acima. A imagem ficará nítida e a leitura será imediata! Toque na imagem para focar.
+                  </p>
+                </div>
+              </div>
+
+              {/* Direct Native Camera & Gallery Triggers */}
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <button
                   type="button"
@@ -551,7 +953,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   className="py-2.5 px-3 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors active:scale-98"
                 >
                   <Smartphone size={15} />
-                  <span>Foto com Câmera Nativa</span>
+                  <span>Foto Câmera Nativa</span>
                 </button>
                 <input
                   ref={cameraCaptureInputRef}
@@ -652,51 +1054,68 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                     pattern="[0-9]*"
                     maxLength={14}
                     value={manualCode}
-                    onChange={(e) => setManualCode(e.target.value.replace(/\D/g, '').slice(0, 14))}
+                    onChange={(e) => {
+                      const numOnly = e.target.value.replace(/\D/g, '').slice(0, 14);
+                      setManualCode(numOnly);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && manualCode.trim()) {
+                        lookupBarcode(manualCode);
+                      }
+                    }}
                     placeholder="Ex: 7891000100103"
-                    className="w-full px-4 py-3 pl-11 text-base sm:text-lg font-mono tracking-widest text-center border border-neutral-200 bg-white text-neutral-950 rounded-2xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
-                    autoFocus
+                    className="w-full text-center font-mono text-xl tracking-wider py-3.5 px-4 bg-neutral-50 border-2 border-neutral-300 focus:border-amber-500 focus:bg-white rounded-2xl font-black text-neutral-900 focus:outline-none transition-all"
                   />
-                  <BarcodeIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" size={20} />
+                  {manualCode && (
+                    <button
+                      type="button"
+                      onClick={() => setManualCode('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-neutral-400 hover:text-neutral-600 rounded-full"
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
                 </div>
-                <div className="flex justify-between items-center px-1 mt-1 text-[11px] text-neutral-400 font-mono">
-                  <span>Padrão EAN-8, EAN-13 ou GTIN-14</span>
-                  <span className={manualCode.length === 14 ? 'font-bold text-amber-600' : ''}>
-                    {manualCode.length}/14 dígitos
-                  </span>
+                <div className="flex justify-between items-center mt-1.5 px-1 text-[11px] text-neutral-400">
+                  <span>Padrão EAN-8, EAN-13 ou UPC-A</span>
+                  <span>{manualCode.length}/14 dígitos</span>
                 </div>
               </div>
 
               <button
                 type="button"
-                disabled={!manualCode || manualCode.length < 4 || isLookingUp}
+                disabled={!manualCode.trim() || isLookingUp}
                 onClick={() => lookupBarcode(manualCode)}
-                className="w-full py-3 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white font-black text-xs rounded-2xl shadow-sm transition-all flex items-center justify-center gap-2"
+                className="w-full py-3.5 px-4 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed active:scale-98 text-white rounded-2xl text-xs font-black transition-all shadow-sm flex items-center justify-center gap-2"
               >
                 {isLookingUp ? (
                   <>
                     <Loader2 size={16} className="animate-spin" />
-                    <span>Consultando na base...</span>
+                    <span>Consultando Bases...</span>
                   </>
                 ) : (
                   <>
                     <Search size={16} />
-                    <span>Consultar e Identificar</span>
+                    <span>Consultar Código</span>
                   </>
                 )}
               </button>
+
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 text-[11px] text-neutral-600 space-y-1">
+                <p className="font-bold text-neutral-800 flex items-center gap-1.5">
+                  <Database size={13} className="text-emerald-600" />
+                  Base interna offline integrada
+                </p>
+                <p>
+                  Mais de 11.000 produtos das principais marcas do Brasil já vêm cadastrados nativamente no app e podem ser consultados mesmo sem nenhuma conexão com a internet.
+                </p>
+              </div>
             </div>
           )}
-
-          {/* Hidden canvas for decoding files */}
-          <div id="barcode-file-hidden-canvas" className="hidden" />
         </div>
 
-        {/* Footer info */}
-        <div className="px-5 py-3 bg-neutral-50 border-t border-neutral-100 text-[11px] text-neutral-500 flex items-center justify-between">
-          <span>Compatível com EAN-13, EAN-8, UPC e QR</span>
-          <span className="font-bold text-sky-600">Reconhecimento Local</span>
-        </div>
+        {/* Hidden div for decoding gallery image files */}
+        <div id="barcode-file-hidden-canvas" className="hidden" />
       </div>
     </div>
   );

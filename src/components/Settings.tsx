@@ -2,10 +2,11 @@ import React, { useState, useRef } from 'react';
 import { 
   Trash2, Sliders, ShieldAlert, Download, Upload, HardDrive, 
   AlertTriangle, CheckCircle2, Info, Smartphone,
-  Layers, Package, Check, ChevronDown, ChevronUp, Sparkles
+  Layers, Package, Check, ChevronDown, ChevronUp, Sparkles, Database, Zap
 } from 'lucide-react';
 import { Category, Product, Purchase, PurchaseItem } from '../types';
 import { APP_VERSION_INFO } from '../version';
+import { getOfflineDatabaseStats } from '../utils/offlineBarcodeCatalog';
 
 interface SettingsProps {
   user: any;
@@ -324,7 +325,7 @@ export function Settings({
             Informações do Sistema & Versão
           </h3>
           <span className="text-xs font-black px-2.5 py-1 bg-sky-50 text-sky-700 rounded-full border border-sky-200">
-            v{APP_VERSION_INFO.version} (Build #{APP_VERSION_INFO.buildNumber})
+            v{APP_VERSION_INFO.version}
           </span>
         </div>
 
@@ -342,6 +343,49 @@ export function Settings({
           <div className="p-3.5 bg-neutral-50/80 rounded-2xl border border-neutral-200">
             <span className="text-[10px] uppercase font-bold text-neutral-400 block">Última Atualização</span>
             <span className="text-xs font-bold text-neutral-800 block">{formatReleaseDate(APP_VERSION_INFO.releaseDate)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION: Offline Barcode Catalog & Learning Stats */}
+      <div className="bg-white p-5 sm:p-6 rounded-3xl border border-neutral-200/90 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-black text-sm text-neutral-900 flex items-center gap-2">
+            <Database size={16} className="text-emerald-600" />
+            Base de Produtos Offline Nativa
+          </h3>
+          <span className="text-xs font-black px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200 flex items-center gap-1">
+            <Zap size={11} /> 100% Offline
+          </span>
+        </div>
+
+        <p className="text-xs text-neutral-600 leading-relaxed text-justify">
+          O aplicativo conta com uma base nativa embutida de mais de 11.000 produtos com código de barras (EAN-13), nome, marca, categoria e unidade padrão. Funciona instantaneamente sem internet e sem vínculo ao Firebase. Ao cadastrar novos produtos, o aplicativo aprende e grava na memória local do aparelho.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+          <div className="p-3.5 bg-neutral-50/80 rounded-2xl border border-neutral-200">
+            <span className="text-[10px] uppercase font-bold text-neutral-400 block">Base Nativa Embutida</span>
+            <span className="text-base font-black text-neutral-900 block">
+              {getOfflineDatabaseStats().builtInCount.toLocaleString('pt-BR')} produtos
+            </span>
+            <span className="text-[10px] text-neutral-500 font-medium">Itens de marcas líderes no Brasil</span>
+          </div>
+
+          <div className="p-3.5 bg-neutral-50/80 rounded-2xl border border-neutral-200">
+            <span className="text-[10px] uppercase font-bold text-neutral-400 block">Memória de Aprendizado</span>
+            <span className="text-base font-black text-emerald-600 block">
+              +{getOfflineDatabaseStats().learnedCount.toLocaleString('pt-BR')} aprendidos
+            </span>
+            <span className="text-[10px] text-neutral-500 font-medium">Gravados localmente pelo uso</span>
+          </div>
+
+          <div className="p-3.5 bg-neutral-50/80 rounded-2xl border border-neutral-200">
+            <span className="text-[10px] uppercase font-bold text-neutral-400 block">Total Offline Disponível</span>
+            <span className="text-base font-black text-sky-600 block">
+              {getOfflineDatabaseStats().totalCount.toLocaleString('pt-BR')} produtos
+            </span>
+            <span className="text-[10px] text-neutral-500 font-medium">Consulta offline em 0ms</span>
           </div>
         </div>
       </div>

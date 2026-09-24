@@ -33,6 +33,7 @@ import { Category, Product, Purchase, PurchaseItem, UserProfile } from './types'
 import { DEFAULT_CATEGORIES, DEFAULT_PRODUCTS } from './defaultData';
 import { isValidCPF } from './utils/textFormatters';
 import { normalizeBrand, isProductDuplicate } from './utils/brand';
+import { learnBarcode } from './utils/offlineBarcodeCatalog';
 import { Capacitor } from '@capacitor/core';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 
@@ -2270,6 +2271,18 @@ export function useShoppingData() {
     setProducts(updated);
     if (user) saveUserData('products', updated, user.uid);
 
+    // Save to local device offline learning base
+    if (newProd.barcode) {
+      const catObj = categories.find(c => c.id === newProd.categoryId);
+      learnBarcode({
+        barcode: newProd.barcode,
+        name: newProd.name,
+        brand: newProd.brand,
+        category: catObj?.name || 'Mercearia',
+        unit: newProd.unit
+      });
+    }
+
     if (user && !('isOffline' in user) && isOnline) {
       try {
         await setDoc(doc(db, 'users', uid, 'products', newProd.id), newProd);
@@ -2356,6 +2369,19 @@ export function useShoppingData() {
     } : prod);
     setProducts(updated);
     if (user) saveUserData('products', updated, user.uid);
+
+    // Save/update in local device offline learning base
+    const updatedProd = updated.find(p => p.id === id);
+    if (updatedProd && updatedProd.barcode) {
+      const catObj = categories.find(c => c.id === updatedProd.categoryId);
+      learnBarcode({
+        barcode: updatedProd.barcode,
+        name: updatedProd.name,
+        brand: updatedProd.brand,
+        category: catObj?.name || 'Mercearia',
+        unit: updatedProd.unit
+      });
+    }
 
     if (user && !('isOffline' in user) && isOnline) {
       try {
