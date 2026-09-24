@@ -30,17 +30,7 @@ jobs:
         run: npm run lint
 
       - name: Validate App Version
-        run: |
-          node -e "
-          const fs = require('fs');
-          const versionTs = fs.readFileSync('src/version.ts', 'utf8');
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          const vMatch = versionTs.match(/version:\s*'([^']+)'/);
-          const bMatch = versionTs.match(/buildNumber:\s*(\d+)/);
-          const appVersion = vMatch ? vMatch[1] : pkg.version;
-          const buildNumber = bMatch ? parseInt(bMatch[1]) : 21;
-          console.log('✓ Validated App Version: v' + appVersion + ' (Build ' + buildNumber + ')');
-          "
+        run: node scripts/sync-version.cjs
 
       - name: Run Automated Test Suite
         run: npm run test
@@ -69,27 +59,7 @@ jobs:
         run: npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 
       - name: Synchronize and Validate App Version
-        run: |
-          node -e "
-          const fs = require('fs');
-          const versionTs = fs.readFileSync('src/version.ts', 'utf8');
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          const vMatch = versionTs.match(/version:\s*'([^']+)'/);
-          const bMatch = versionTs.match(/buildNumber:\s*(\d+)/);
-          const appVersion = vMatch ? vMatch[1] : pkg.version;
-          const buildNumber = bMatch ? parseInt(bMatch[1]) : 21;
-
-          let gradle = fs.readFileSync('android/app/build.gradle', 'utf8');
-          gradle = gradle.replace(/versionCode\s+\d+/, 'versionCode ' + buildNumber);
-          gradle = gradle.replace(/versionName\s+\"[^\"]+\"/, 'versionName \"' + appVersion + '\"');
-          fs.writeFileSync('android/app/build.gradle', gradle);
-
-          if (process.env.GITHUB_ENV) {
-            fs.appendFileSync(process.env.GITHUB_ENV, `APP_VERSION=${appVersion}\nAPP_BUILD=${buildNumber}\n`);
-          }
-
-          console.log('✓ Successfully synchronized build target to Version v' + appVersion + ' (Build ' + buildNumber + ')');
-          "
+        run: node scripts/sync-version.cjs
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
