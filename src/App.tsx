@@ -82,10 +82,22 @@ export default function App() {
 
   if (data.loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-white text-neutral-600">
-        <AppLogo size={56} className="mb-4 animate-bounce" />
-        <RefreshCw size={24} className="animate-spin text-sky-500 mb-2" />
-        <p className="text-sm font-black text-neutral-800 tracking-tight">Carregando Feira Fácil...</p>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-sky-600 via-sky-500 to-sky-700 text-white p-6 select-none">
+        <div className="relative flex flex-col items-center animate-in fade-in zoom-in-95 duration-500">
+          <div className="p-3 bg-white/10 rounded-3xl backdrop-blur-md shadow-2xl mb-5 ring-1 ring-white/20">
+            <AppLogo size={72} />
+          </div>
+          <h1 className="text-2xl font-black tracking-tight text-white drop-shadow-md">
+            Feira Fácil
+          </h1>
+          <p className="text-xs font-bold text-sky-100 tracking-widest uppercase mt-1">
+            Supermercado Inteligente
+          </p>
+          <div className="flex items-center gap-2 mt-8 px-4 py-2 bg-black/15 backdrop-blur-md rounded-full border border-white/10 text-xs font-semibold text-sky-100">
+            <RefreshCw size={14} className="animate-spin text-white" />
+            <span>Inicializando aplicativo...</span>
+          </div>
+        </div>
       </div>
     );
   }

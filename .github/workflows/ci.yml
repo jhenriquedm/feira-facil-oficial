@@ -101,9 +101,10 @@ jobs:
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Feira_Facil.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: feira-facil-apk-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: Feira_Facil_APK
+          path: android/app/build/outputs/apk/debug/Feira_Facil.apk

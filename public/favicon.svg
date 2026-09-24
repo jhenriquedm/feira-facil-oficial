@@ -1,34 +1,64 @@
-<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="48" height="48" rx="14" fill="url(#bg-grad)"/>
-  <defs>
-    <linearGradient id="bg-grad" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0284C7"/>
-      <stop offset="0.5" stop-color="#0EA5E9"/>
-      <stop offset="1" stop-color="#10B981"/>
-    </linearGradient>
-  </defs>
+
+  <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bgGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#0284c7"/>
+        <stop offset="50%" stop-color="#0ea5e9"/>
+        <stop offset="100%" stop-color="#06b6d4"/>
+      </linearGradient>
+
+      <linearGradient id="splashBg" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#0284c7"/>
+        <stop offset="100%" stop-color="#0369a1"/>
+      </linearGradient>
+
+      <filter id="dropShadow" x="-10%" y="-10%" width="130%" height="130%">
+        <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0369a1" flood-opacity="0.35"/>
+      </filter>
+    </defs>
+
+    <!-- Background -->
+    <rect width="512" height="512" fill="url(#bgGrad)" />
+
+    <!-- Main Shopping Cart Icon Group -->
+    <g transform="translate(40.96, 40.96) scale(8.959999999999999)" filter="url(#dropShadow)">
+      <!-- Groceries inside Cart -->
+      <!-- Green base / Apple -->
+      <path d="M17 18C17 14.5 19.5 12 23 12C26.5 12 29 14.5 29 18H17Z" fill="#34D399" />
+      
+      <!-- Yellow Star / Fresh Fruit -->
+      <path d="M27 18C27 13.5 30 11 34 11C38 11 40 14 39 18H27Z" fill="#FBBF24" />
+      
+      <!-- Red Cherry with green stem -->
+      <circle cx="23" cy="11" r="2.5" fill="#EF4444" />
+      <path d="M23 8.5C23.5 7 25 6 26.5 6" stroke="#10B981" stroke-width="2" stroke-linecap="round" fill="none" />
+
+      <!-- Yellow star accent -->
+      <path d="M39 7L40.5 10.5L44 12L40.5 13.5L39 17L37.5 13.5L34 12L37.5 10.5L39 7Z" fill="#FDE047" />
+
+      <!-- Cart Wireframe and Base -->
+      <path 
+        d="M8 12H13.5L18.2 27.5C18.6 28.8 19.8 29.8 21.2 29.8H36.8C38.2 29.8 39.4 28.8 39.8 27.5L43 17H15" 
+        stroke="white" 
+        stroke-width="3.6" 
+        stroke-linecap="round" 
+        stroke-linejoin="round" 
+        fill="none"
+      />
+      <!-- Cart Inner Grid Lines -->
+      <path d="M20 19H40" stroke="white" stroke-width="2" stroke-linecap="round" stroke-opacity="0.85" />
+      <path d="M22 25H38" stroke="white" stroke-width="2" stroke-linecap="round" stroke-opacity="0.85" />
+      <path d="M26 17V29" stroke="white" stroke-width="2" stroke-linecap="round" stroke-opacity="0.85" />
+      <path d="M33 17V29" stroke="white" stroke-width="2" stroke-linecap="round" stroke-opacity="0.85" />
+
+      <!-- Cart Wheels -->
+      <circle cx="21.5" cy="38.5" r="3.5" fill="white" />
+      <circle cx="21.5" cy="38.5" r="1.5" fill="#0284C7" />
+      
+      <circle cx="36.5" cy="38.5" r="3.5" fill="white" />
+      <circle cx="36.5" cy="38.5" r="1.5" fill="#0284C7" />
+    </g>
+
+    
+  </svg>
   
-  <!-- Grocery items inside cart -->
-  <path d="M17 18C17 14.5 19.5 12 23 12C26.5 12 29 14.5 29 18H17Z" fill="#34D399" />
-  <path d="M27 18C27 13.5 30 11 34 11C38 11 40 14 39 18H27Z" fill="#FBBF24" />
-  <circle cx="23" cy="11" r="2.5" fill="#EF4444" />
-  <path d="M23 8.5C23.5 7 25 6 26.5 6" stroke="#10B981" stroke-width="2" stroke-linecap="round" />
-
-  <!-- Cart Basket Base -->
-  <path d="M8 12H13.5L18.2 27.5C18.6 28.8 19.8 29.8 21.2 29.8H36.8C38.2 29.8 39.4 28.8 39.8 27.5L43 17H15" stroke="white" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
-  <!-- Cart Grid Lines -->
-  <path d="M20 19H40" stroke="white" stroke-width="2" stroke-linecap="round" stroke-opacity="0.75" />
-  <path d="M22 25H38" stroke="white" stroke-width="2" stroke-linecap="round" stroke-opacity="0.75" />
-  <path d="M26 17V29" stroke="white" stroke-width="2" stroke-linecap="round" stroke-opacity="0.75" />
-  <path d="M33 17V29" stroke="white" stroke-width="2" stroke-linecap="round" stroke-opacity="0.75" />
-
-  <!-- Wheels -->
-  <circle cx="21.5" cy="38.5" r="3.5" fill="white" />
-  <circle cx="21.5" cy="38.5" r="1.5" fill="#0284C7" />
-  
-  <circle cx="36.5" cy="38.5" r="3.5" fill="white" />
-  <circle cx="36.5" cy="38.5" r="1.5" fill="#0284C7" />
-
-  <!-- Sparkle badge -->
-  <path d="M39 7L40.5 10.5L44 12L40.5 13.5L39 17L37.5 13.5L34 12L37.5 10.5L39 7Z" fill="#FDE047" />
-</svg>
