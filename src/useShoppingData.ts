@@ -93,17 +93,24 @@ export function useShoppingData() {
     return localStorage.getItem('feira_theme_color') || '#0ea5e9'; // default sky-500
   });
 
-  // Track online/offline status
+  // Track online/offline status & trigger queue sync on network recovery
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (user && user.uid && user.uid !== 'guest') {
+        processPendingSyncQueue(user.uid);
+      }
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [user]);
 
   // Sync theme mode & dynamic theme color variables
   useEffect(() => {
@@ -129,6 +136,30 @@ export function useShoppingData() {
   const loadUserData = <T = any>(key: string, defaultValue: T, userId: string): T => {
     const saved = localStorage.getItem(`feira_user_${userId}_${key}`);
     return saved ? JSON.parse(saved) : defaultValue;
+  };
+
+  // --- Offline Pending Sync Queue Helpers ---
+  const getPendingQueue = (uid: string): any[] => {
+    if (!uid || uid === 'guest') return [];
+    const raw = localStorage.getItem(`feira_pending_queue_${uid}`);
+    return raw ? JSON.parse(raw) : [];
+  };
+
+  const savePendingQueue = (uid: string, queue: any[]) => {
+    if (!uid || uid === 'guest') return;
+    localStorage.setItem(`feira_pending_queue_${uid}`, JSON.stringify(queue));
+  };
+
+  const enqueueSyncOperation = (uid: string, op: { type: 'set' | 'update' | 'delete'; path: string; data?: any }) => {
+    if (!uid || uid === 'guest') return;
+    const queue = getPendingQueue(uid);
+    const newOp = {
+      ...op,
+      id: 'sync_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      timestamp: new Date().toISOString()
+    };
+    queue.push(newOp);
+    savePendingQueue(uid, queue);
   };
 
   // Helper to store active user session across all offline session keys
@@ -178,6 +209,52 @@ export function useShoppingData() {
         });
       });
       await batch.commit();
+    }
+  };
+
+  // Process offline pending operations queue against Firestore
+  const processPendingSyncQueue = async (targetUid?: string) => {
+    const uid = targetUid || (user ? user.uid : null);
+    if (!uid || uid === 'guest') return;
+
+    const queue = getPendingQueue(uid);
+    if (queue.length === 0) {
+      if (isOnline && user && !('isOffline' in user)) {
+        await syncGuestDataToAccount();
+      }
+      return;
+    }
+
+    if (!isOnline) return;
+
+    setIsSyncing(true);
+    try {
+      const remainingQueue: any[] = [];
+      for (const op of queue) {
+        try {
+          const docRef = doc(db, op.path);
+          if (op.type === 'set') {
+            await setDoc(docRef, cleanPayload(op.data), { merge: true });
+          } else if (op.type === 'update') {
+            await updateDoc(docRef, cleanPayload(op.data));
+          } else if (op.type === 'delete') {
+            await deleteDoc(docRef);
+          }
+        } catch (err) {
+          console.warn(`Error processing sync queue item ${op.id} at ${op.path}:`, err);
+          remainingQueue.push(op);
+        }
+      }
+
+      savePendingQueue(uid, remainingQueue);
+
+      if (remainingQueue.length === 0 && user && !('isOffline' in user)) {
+        await syncGuestDataToAccount();
+      }
+    } catch (err) {
+      console.error("Error running pending sync queue:", err);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -261,6 +338,9 @@ export function useShoppingData() {
           photoURL: firebaseUser.photoURL || undefined,
           canUseOffline: true
         });
+
+        // Immediately drain any pending offline operations queue
+        processPendingSyncQueue(uid);
 
         // 0. Listen for User Profile Document in Firestore /users/{uid}
         const userDocRef = doc(db, 'users', uid);
@@ -1632,8 +1712,19 @@ export function useShoppingData() {
         const timeout = new Promise(res => setTimeout(res, 2500));
         await Promise.race([firestorePromise, timeout]);
       } catch (firestoreErr) {
-        console.warn("Firestore user sync notice:", firestoreErr);
+        console.warn("Firestore user sync notice, queueing for offline sync:", firestoreErr);
+        enqueueSyncOperation(currentUid, {
+          type: 'set',
+          path: `users/${currentUid}`,
+          data: { id: currentUid, ...updates }
+        });
       }
+    } else {
+      enqueueSyncOperation(currentUid, {
+        type: 'set',
+        path: `users/${currentUid}`,
+        data: { id: currentUid, ...updates }
+      });
     }
   };
 
@@ -1997,12 +2088,28 @@ export function useShoppingData() {
       userId: uid
     };
 
-    if (user && !('isOffline' in user)) {
-      await setDoc(doc(db, 'users', uid, 'categories', newCat.id), newCat);
-    } else {
-      const updated = [...categories, newCat];
-      setCategories(updated);
-      if (user) saveUserData('categories', updated, user.uid);
+    // Local-first: always update local React state & localStorage
+    const updated = [...categories, newCat];
+    setCategories(updated);
+    if (user) saveUserData('categories', updated, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        await setDoc(doc(db, 'users', uid, 'categories', newCat.id), newCat);
+      } catch (err) {
+        console.warn("Direct Firestore category creation failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'set',
+          path: `users/${uid}/categories/${newCat.id}`,
+          data: newCat
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'set',
+        path: `users/${uid}/categories/${newCat.id}`,
+        data: newCat
+      });
     }
 
     return newCat;
@@ -2026,18 +2133,32 @@ export function useShoppingData() {
     }
 
     const uid = user ? user.uid : 'guest';
-    if (user && !('isOffline' in user)) {
-      await updateDoc(doc(db, 'users', uid, 'categories', id), {
-        name: cleanedName,
-        iconName,
-        updatedAt: new Date().toISOString()
+    const updatedAt = new Date().toISOString();
+    const updated = categories.map(cat => cat.id === id ? {
+      ...cat, name: cleanedName, iconName, updatedAt
+    } : cat);
+    setCategories(updated);
+    if (user) saveUserData('categories', updated, user.uid);
+
+    const updatePayload = { name: cleanedName, iconName, updatedAt };
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        await updateDoc(doc(db, 'users', uid, 'categories', id), updatePayload);
+      } catch (err) {
+        console.warn("Direct Firestore category update failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'update',
+          path: `users/${uid}/categories/${id}`,
+          data: updatePayload
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'update',
+        path: `users/${uid}/categories/${id}`,
+        data: updatePayload
       });
-    } else {
-      const updated = categories.map(cat => cat.id === id ? {
-        ...cat, name: cleanedName, iconName, updatedAt: new Date().toISOString()
-      } : cat);
-      setCategories(updated);
-      if (user) saveUserData('categories', updated, user.uid);
     }
   };
 
@@ -2049,12 +2170,25 @@ export function useShoppingData() {
     }
 
     const uid = user ? user.uid : 'guest';
-    if (user && !('isOffline' in user)) {
-      await deleteDoc(doc(db, 'users', uid, 'categories', id));
-    } else {
-      const updated = categories.filter(cat => cat.id !== id);
-      setCategories(updated);
-      if (user) saveUserData('categories', updated, user.uid);
+    const updated = categories.filter(cat => cat.id !== id);
+    setCategories(updated);
+    if (user) saveUserData('categories', updated, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        await deleteDoc(doc(db, 'users', uid, 'categories', id));
+      } catch (err) {
+        console.warn("Direct Firestore category deletion failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'delete',
+          path: `users/${uid}/categories/${id}`
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'delete',
+        path: `users/${uid}/categories/${id}`
+      });
     }
   };
 
@@ -2131,12 +2265,28 @@ export function useShoppingData() {
       userId: uid
     };
 
-    if (user && !('isOffline' in user)) {
-      await setDoc(doc(db, 'users', uid, 'products', newProd.id), newProd);
-    } else {
-      const updated = [...products, newProd];
-      setProducts(updated);
-      if (user) saveUserData('products', updated, user.uid);
+    // Local-first: always update local React state & localStorage
+    const updated = [...products, newProd];
+    setProducts(updated);
+    if (user) saveUserData('products', updated, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        await setDoc(doc(db, 'users', uid, 'products', newProd.id), newProd);
+      } catch (err) {
+        console.warn("Direct Firestore product creation failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'set',
+          path: `users/${uid}/products/${newProd.id}`,
+          data: newProd
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'set',
+        path: `users/${uid}/products/${newProd.id}`,
+        data: newProd
+      });
     }
     return newProd;
   };
@@ -2197,20 +2347,33 @@ export function useShoppingData() {
       ...(cleanedName !== undefined ? { name: cleanedName } : {}),
       ...(cleanedBrand !== undefined ? { brand: cleanedBrand } : {}),
       ...(cleanedBarcode !== undefined ? { barcode: cleanedBarcode } : {}),
+      updatedAt: new Date().toISOString()
     };
 
     const uid = user ? user.uid : 'guest';
-    if (user && !('isOffline' in user)) {
-      await updateDoc(doc(db, 'users', uid, 'products', id), {
-        ...finalData,
-        updatedAt: new Date().toISOString()
+    const updated = products.map(prod => prod.id === id ? {
+      ...prod, ...finalData
+    } : prod);
+    setProducts(updated);
+    if (user) saveUserData('products', updated, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        await updateDoc(doc(db, 'users', uid, 'products', id), finalData);
+      } catch (err) {
+        console.warn("Direct Firestore product update failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'update',
+          path: `users/${uid}/products/${id}`,
+          data: finalData
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'update',
+        path: `users/${uid}/products/${id}`,
+        data: finalData
       });
-    } else {
-      const updated = products.map(prod => prod.id === id ? {
-        ...prod, ...finalData, updatedAt: new Date().toISOString()
-      } : prod);
-      setProducts(updated);
-      if (user) saveUserData('products', updated, user.uid);
     }
   };
 
@@ -2224,12 +2387,25 @@ export function useShoppingData() {
     }
 
     const uid = user ? user.uid : 'guest';
-    if (user && !('isOffline' in user)) {
-      await deleteDoc(doc(db, 'users', uid, 'products', id));
-    } else {
-      const updated = products.filter(prod => prod.id !== id);
-      setProducts(updated);
-      if (user) saveUserData('products', updated, user.uid);
+    const updated = products.filter(prod => prod.id !== id);
+    setProducts(updated);
+    if (user) saveUserData('products', updated, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        await deleteDoc(doc(db, 'users', uid, 'products', id));
+      } catch (err) {
+        console.warn("Direct Firestore product deletion failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'delete',
+          path: `users/${uid}/products/${id}`
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'delete',
+        path: `users/${uid}/products/${id}`
+      });
     }
   };
 
@@ -2313,26 +2489,52 @@ export function useShoppingData() {
       };
     });
 
-    if (user && !('isOffline' in user)) {
-      const batch = writeBatch(db);
-      batch.set(doc(db, 'users', uid, 'purchases', newPur.id), newPur);
-      initialItems.forEach((item) => {
-        batch.set(doc(db, 'users', uid, 'purchases', newPur.id, 'items', item.id), item);
-      });
-      await batch.commit();
+    // Local-first: always update local React state & localStorage
+    const updatedPurchases = [...purchases, newPur];
+    const updatedItems = { ...purchaseItems, [newPur.id]: initialItems };
+    setPurchases(updatedPurchases);
+    setPurchaseItems(updatedItems);
+    if (user) {
+      saveUserData('purchases', updatedPurchases, user.uid);
+      saveUserData('purchase_items', updatedItems, user.uid);
+    }
 
-      const updatedPurchases = [...purchases, newPur];
-      const updatedItems = { ...purchaseItems, [newPur.id]: initialItems };
-      setPurchases(updatedPurchases);
-      setPurchaseItems(updatedItems);
-    } else {
-      const updated = [...purchases, newPur];
-      setPurchases(updated);
-      if (user) saveUserData('purchases', updated, user.uid);
-      
-      const currentItems = { ...purchaseItems, [newPur.id]: initialItems };
-      setPurchaseItems(currentItems);
-      if (user) saveUserData('purchase_items', currentItems, user.uid);
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'users', uid, 'purchases', newPur.id), newPur);
+        initialItems.forEach((item) => {
+          batch.set(doc(db, 'users', uid, 'purchases', newPur.id, 'items', item.id), item);
+        });
+        await batch.commit();
+      } catch (err) {
+        console.warn("Direct Firestore addPurchase failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'set',
+          path: `users/${uid}/purchases/${newPur.id}`,
+          data: newPur
+        });
+        initialItems.forEach(item => {
+          enqueueSyncOperation(uid, {
+            type: 'set',
+            path: `users/${uid}/purchases/${newPur.id}/items/${item.id}`,
+            data: item
+          });
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'set',
+        path: `users/${uid}/purchases/${newPur.id}`,
+        data: newPur
+      });
+      initialItems.forEach(item => {
+        enqueueSyncOperation(uid, {
+          type: 'set',
+          path: `users/${uid}/purchases/${newPur.id}/items/${item.id}`,
+          data: item
+        });
+      });
     }
     return newPur;
   };
@@ -2372,14 +2574,29 @@ export function useShoppingData() {
     };
 
     const uid = user ? user.uid : 'guest';
-    if (user && !('isOffline' in user)) {
-      await updateDoc(doc(db, 'users', uid, 'purchases', id), finalData);
-    } else {
-      const updated = purchases.map(pur => pur.id === id ? {
-        ...pur, ...finalData
-      } : pur);
-      setPurchases(updated);
-      if (user) saveUserData('purchases', updated, user.uid);
+    const updated = purchases.map(pur => pur.id === id ? {
+      ...pur, ...finalData
+    } : pur);
+    setPurchases(updated);
+    if (user) saveUserData('purchases', updated, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        await updateDoc(doc(db, 'users', uid, 'purchases', id), finalData);
+      } catch (err) {
+        console.warn("Direct Firestore updatePurchase failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'update',
+          path: `users/${uid}/purchases/${id}`,
+          data: finalData
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'update',
+        path: `users/${uid}/purchases/${id}`,
+        data: finalData
+      });
     }
   };
 
@@ -2390,8 +2607,16 @@ export function useShoppingData() {
     }
 
     const uid = user ? user.uid : 'guest';
-    if (user && !('isOffline' in user)) {
-      // Cascade delete items in subcollection
+    const updated = purchases.filter(pur => pur.id !== id);
+    setPurchases(updated);
+    if (user) saveUserData('purchases', updated, user.uid);
+    
+    const updatedItems = { ...purchaseItems };
+    delete updatedItems[id];
+    setPurchaseItems(updatedItems);
+    if (user) saveUserData('purchase_items', updatedItems, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
       try {
         const itemsSnap = await getDocs(collection(db, 'users', uid, 'purchases', id, 'items'));
         const batch = writeBatch(db);
@@ -2401,18 +2626,17 @@ export function useShoppingData() {
         batch.delete(doc(db, 'users', uid, 'purchases', id));
         await batch.commit();
       } catch (err) {
-        console.error("Erro ao deletar compra em cascata:", err);
-        await deleteDoc(doc(db, 'users', uid, 'purchases', id));
+        console.warn("Direct Firestore deletePurchase failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'delete',
+          path: `users/${uid}/purchases/${id}`
+        });
       }
-    } else {
-      const updated = purchases.filter(pur => pur.id !== id);
-      setPurchases(updated);
-      if (user) saveUserData('purchases', updated, user.uid);
-      
-      const updatedItems = { ...purchaseItems };
-      delete updatedItems[id];
-      setPurchaseItems(updatedItems);
-      if (user) saveUserData('purchase_items', updatedItems, user.uid);
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'delete',
+        path: `users/${uid}/purchases/${id}`
+      });
     }
   };
 
@@ -2459,24 +2683,51 @@ export function useShoppingData() {
       isChecked: false // Reset checklist for new shopping trip
     }));
 
-    if (user && !('isOffline' in user)) {
-      const batch = writeBatch(db);
-      batch.set(doc(db, 'users', uid, 'purchases', newPur.id), newPur);
-      clonedItems.forEach(item => {
-        batch.set(doc(db, 'users', uid, 'purchases', newPur.id, 'items', item.id), item);
+    // Local-first: update React state & localStorage
+    const updatedPurchases = [...purchases, newPur];
+    setPurchases(updatedPurchases);
+    if (user) saveUserData('purchases', updatedPurchases, user.uid);
+
+    const allItems = { ...purchaseItems, [newPur.id]: clonedItems };
+    setPurchaseItems(allItems);
+    if (user) saveUserData('purchase_items', allItems, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'users', uid, 'purchases', newPur.id), newPur);
+        clonedItems.forEach(item => {
+          batch.set(doc(db, 'users', uid, 'purchases', newPur.id, 'items', item.id), item);
+        });
+        await batch.commit();
+      } catch (err) {
+        console.warn("Direct Firestore duplicatePurchase failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'set',
+          path: `users/${uid}/purchases/${newPur.id}`,
+          data: newPur
+        });
+        clonedItems.forEach(item => {
+          enqueueSyncOperation(uid, {
+            type: 'set',
+            path: `users/${uid}/purchases/${newPur.id}/items/${item.id}`,
+            data: item
+          });
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'set',
+        path: `users/${uid}/purchases/${newPur.id}`,
+        data: newPur
       });
-      await batch.commit();
-
-      setPurchases(prev => [...prev, newPur]);
-      setPurchaseItems(prev => ({ ...prev, [newPur.id]: clonedItems }));
-    } else {
-      const updatedPurchases = [...purchases, newPur];
-      setPurchases(updatedPurchases);
-      if (user) saveUserData('purchases', updatedPurchases, user.uid);
-
-      const allItems = { ...purchaseItems, [newPur.id]: clonedItems };
-      setPurchaseItems(allItems);
-      if (user) saveUserData('purchase_items', allItems, user.uid);
+      clonedItems.forEach(item => {
+        enqueueSyncOperation(uid, {
+          type: 'set',
+          path: `users/${uid}/purchases/${newPur.id}/items/${item.id}`,
+          data: item
+        });
+      });
     }
 
     return newPur;
@@ -2519,33 +2770,51 @@ export function useShoppingData() {
     };
 
     const uid = user ? user.uid : 'guest';
-    if (user && !('isOffline' in user)) {
-      await setDoc(doc(db, 'users', uid, 'purchases', purchaseId, 'items', newItem.id), newItem);
-      
-      const currentPur = purchases.find(p => p.id === purchaseId);
-      if (currentPur) {
-        const currentList = purchaseItems[purchaseId] || [];
-        const updatedList = [...currentList, newItem];
-        const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const updatedList = [...currentList, newItem];
+    const allItems = { ...purchaseItems, [purchaseId]: updatedList };
+    setPurchaseItems(allItems);
+    if (user) saveUserData('purchase_items', allItems, user.uid);
+    
+    const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const updatedPurchases = purchases.map(pur => pur.id === purchaseId ? {
+      ...pur,
+      total: Number(newTotal.toFixed(2)),
+      updatedAt: new Date().toISOString()
+    } : pur);
+    setPurchases(updatedPurchases);
+    if (user) saveUserData('purchases', updatedPurchases, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        await setDoc(doc(db, 'users', uid, 'purchases', purchaseId, 'items', newItem.id), newItem);
         await updateDoc(doc(db, 'users', uid, 'purchases', purchaseId), {
           total: Number(newTotal.toFixed(2)),
           updatedAt: new Date().toISOString()
         });
+      } catch (err) {
+        console.warn("Direct Firestore addPurchaseItem failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'set',
+          path: `users/${uid}/purchases/${purchaseId}/items/${newItem.id}`,
+          data: newItem
+        });
+        enqueueSyncOperation(uid, {
+          type: 'update',
+          path: `users/${uid}/purchases/${purchaseId}`,
+          data: { total: Number(newTotal.toFixed(2)), updatedAt: new Date().toISOString() }
+        });
       }
-    } else {
-      const updatedList = [...currentList, newItem];
-      const allItems = { ...purchaseItems, [purchaseId]: updatedList };
-      setPurchaseItems(allItems);
-      if (user) saveUserData('purchase_items', allItems, user.uid);
-      
-      const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-      const updatedPurchases = purchases.map(pur => pur.id === purchaseId ? {
-        ...pur,
-        total: Number(newTotal.toFixed(2)),
-        updatedAt: new Date().toISOString()
-      } : pur);
-      setPurchases(updatedPurchases);
-      if (user) saveUserData('purchases', updatedPurchases, user.uid);
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'set',
+        path: `users/${uid}/purchases/${purchaseId}/items/${newItem.id}`,
+        data: newItem
+      });
+      enqueueSyncOperation(uid, {
+        type: 'update',
+        path: `users/${uid}/purchases/${purchaseId}`,
+        data: { total: Number(newTotal.toFixed(2)), updatedAt: new Date().toISOString() }
+      });
     }
   };
 
@@ -2559,61 +2828,101 @@ export function useShoppingData() {
     }
 
     const uid = user ? user.uid : 'guest';
-    if (user && !('isOffline' in user)) {
-      await updateDoc(doc(db, 'users', uid, 'purchases', purchaseId, 'items', itemId), data);
-      
-      const itemsList = purchaseItems[purchaseId] || [];
-      const updatedList = itemsList.map(item => item.id === itemId ? { ...item, ...data } : item);
-      const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-      await updateDoc(doc(db, 'users', uid, 'purchases', purchaseId), {
-        total: Number(newTotal.toFixed(2)),
-        updatedAt: new Date().toISOString()
-      });
-    } else {
-      const currentList = purchaseItems[purchaseId] || [];
-      const updatedList = currentList.map(item => item.id === itemId ? { ...item, ...data } : item);
-      const allItems = { ...purchaseItems, [purchaseId]: updatedList };
-      setPurchaseItems(allItems);
-      if (user) saveUserData('purchase_items', allItems, user.uid);
+    const currentList = purchaseItems[purchaseId] || [];
+    const updatedList = currentList.map(item => item.id === itemId ? { ...item, ...data } : item);
+    const allItems = { ...purchaseItems, [purchaseId]: updatedList };
+    setPurchaseItems(allItems);
+    if (user) saveUserData('purchase_items', allItems, user.uid);
 
-      const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-      const updatedPurchases = purchases.map(pur => pur.id === purchaseId ? {
-        ...pur,
-        total: Number(newTotal.toFixed(2)),
-        updatedAt: new Date().toISOString()
-      } : pur);
-      setPurchases(updatedPurchases);
-      if (user) saveUserData('purchases', updatedPurchases, user.uid);
+    const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const updatedPurchases = purchases.map(pur => pur.id === purchaseId ? {
+      ...pur,
+      total: Number(newTotal.toFixed(2)),
+      updatedAt: new Date().toISOString()
+    } : pur);
+    setPurchases(updatedPurchases);
+    if (user) saveUserData('purchases', updatedPurchases, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        await updateDoc(doc(db, 'users', uid, 'purchases', purchaseId, 'items', itemId), data);
+        await updateDoc(doc(db, 'users', uid, 'purchases', purchaseId), {
+          total: Number(newTotal.toFixed(2)),
+          updatedAt: new Date().toISOString()
+        });
+      } catch (err) {
+        console.warn("Direct Firestore updatePurchaseItem failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'update',
+          path: `users/${uid}/purchases/${purchaseId}/items/${itemId}`,
+          data
+        });
+        enqueueSyncOperation(uid, {
+          type: 'update',
+          path: `users/${uid}/purchases/${purchaseId}`,
+          data: { total: Number(newTotal.toFixed(2)), updatedAt: new Date().toISOString() }
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'update',
+        path: `users/${uid}/purchases/${purchaseId}/items/${itemId}`,
+        data
+      });
+      enqueueSyncOperation(uid, {
+        type: 'update',
+        path: `users/${uid}/purchases/${purchaseId}`,
+        data: { total: Number(newTotal.toFixed(2)), updatedAt: new Date().toISOString() }
+      });
     }
   };
 
   const deletePurchaseItem = async (purchaseId: string, itemId: string) => {
     const uid = user ? user.uid : 'guest';
-    if (user && !('isOffline' in user)) {
-      await deleteDoc(doc(db, 'users', uid, 'purchases', purchaseId, 'items', itemId));
-      
-      const itemsList = purchaseItems[purchaseId] || [];
-      const updatedList = itemsList.filter(item => item.id !== itemId);
-      const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-      await updateDoc(doc(db, 'users', uid, 'purchases', purchaseId), {
-        total: Number(newTotal.toFixed(2)),
-        updatedAt: new Date().toISOString()
-      });
-    } else {
-      const currentList = purchaseItems[purchaseId] || [];
-      const updatedList = currentList.filter(item => item.id !== itemId);
-      const allItems = { ...purchaseItems, [purchaseId]: updatedList };
-      setPurchaseItems(allItems);
-      if (user) saveUserData('purchase_items', allItems, user.uid);
+    const currentList = purchaseItems[purchaseId] || [];
+    const updatedList = currentList.filter(item => item.id !== itemId);
+    const allItems = { ...purchaseItems, [purchaseId]: updatedList };
+    setPurchaseItems(allItems);
+    if (user) saveUserData('purchase_items', allItems, user.uid);
 
-      const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-      const updatedPurchases = purchases.map(pur => pur.id === purchaseId ? {
-        ...pur,
-        total: Number(newTotal.toFixed(2)),
-        updatedAt: new Date().toISOString()
-      } : pur);
-      setPurchases(updatedPurchases);
-      if (user) saveUserData('purchases', updatedPurchases, user.uid);
+    const newTotal = updatedList.filter(item => item.isChecked).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const updatedPurchases = purchases.map(pur => pur.id === purchaseId ? {
+      ...pur,
+      total: Number(newTotal.toFixed(2)),
+      updatedAt: new Date().toISOString()
+    } : pur);
+    setPurchases(updatedPurchases);
+    if (user) saveUserData('purchases', updatedPurchases, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        await deleteDoc(doc(db, 'users', uid, 'purchases', purchaseId, 'items', itemId));
+        await updateDoc(doc(db, 'users', uid, 'purchases', purchaseId), {
+          total: Number(newTotal.toFixed(2)),
+          updatedAt: new Date().toISOString()
+        });
+      } catch (err) {
+        console.warn("Direct Firestore deletePurchaseItem failed, queueing for sync:", err);
+        enqueueSyncOperation(uid, {
+          type: 'delete',
+          path: `users/${uid}/purchases/${purchaseId}/items/${itemId}`
+        });
+        enqueueSyncOperation(uid, {
+          type: 'update',
+          path: `users/${uid}/purchases/${purchaseId}`,
+          data: { total: Number(newTotal.toFixed(2)), updatedAt: new Date().toISOString() }
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      enqueueSyncOperation(uid, {
+        type: 'delete',
+        path: `users/${uid}/purchases/${purchaseId}/items/${itemId}`
+      });
+      enqueueSyncOperation(uid, {
+        type: 'update',
+        path: `users/${uid}/purchases/${purchaseId}`,
+        data: { total: Number(newTotal.toFixed(2)), updatedAt: new Date().toISOString() }
+      });
     }
   };
 
