@@ -324,8 +324,8 @@ export function Settings({
             <Package size={16} className="text-sky-500" />
             Informações do Sistema & Versão
           </h3>
-          <span className="text-xs font-black px-2.5 py-1 bg-sky-50 text-sky-700 rounded-full border border-sky-200">
-            v{APP_VERSION_INFO.version}
+          <span className="text-xs font-black px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-300">
+            v{APP_VERSION_INFO.version} (Build #{APP_VERSION_INFO.buildNumber})
           </span>
         </div>
 

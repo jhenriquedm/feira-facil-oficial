@@ -85,12 +85,15 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
           cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Feira_Facil.apk
+          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Feira_Facil_v${{ env.APP_VERSION }}.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Feira_Facil_APK
-          path: android/app/build/outputs/apk/debug/Feira_Facil.apk
+          path: |
+            android/app/build/outputs/apk/debug/Feira_Facil_v${{ env.APP_VERSION }}.apk
+            android/app/build/outputs/apk/debug/Feira_Facil.apk
 
       - name: Publish Direct APK to GitHub Release
         if: github.ref == 'refs/heads/main'
@@ -98,6 +101,8 @@ jobs:
         with:
           tag_name: v${{ env.APP_VERSION }}
           name: Feira Fácil v${{ env.APP_VERSION }} (Build ${{ env.APP_BUILD }})
-          files: android/app/build/outputs/apk/debug/Feira_Facil.apk
+          files: |
+            android/app/build/outputs/apk/debug/Feira_Facil_v${{ env.APP_VERSION }}.apk
+            android/app/build/outputs/apk/debug/Feira_Facil.apk
           token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
