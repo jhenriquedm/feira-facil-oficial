@@ -11,6 +11,7 @@ import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { ReceiptOcrModal, OcrExtractedItem } from './ReceiptOcrModal';
 import { sanitizeAndCapitalize, formatMoneyInput, parseMoneyToNumber, formatCurrencyBRL } from '../utils/textFormatters';
 import { PRODUCT_UNITS, normalizeProductUnit, getUnitCardDisplay } from '../utils/units';
+import { normalizeBrand, formatBrandDisplay, isSameBrand } from '../utils/brand';
 
 interface PurchasesProps {
   purchases: Purchase[];
@@ -149,8 +150,9 @@ export function Purchases({
 
     // 2. Add each recognized item to the purchase and catalog
     for (const item of data.items) {
+      const normBrand = normalizeBrand(item.brand);
       let matchedProduct = products.find(
-        p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase()
+        p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase() && isSameBrand(p.brand, normBrand)
       );
 
       let categoryId = categories[0]?.id || 'cat_default';
@@ -167,12 +169,14 @@ export function Purchases({
             item.name.trim(),
             categoryId,
             item.unit,
-            item.brand || '',
+            normBrand,
             item.unitPrice,
             item.barcode
           );
         } catch (e) {
           matchedProduct = products.find(
+            p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase() && isSameBrand(p.brand, normBrand)
+          ) || products.find(
             p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase()
           );
         }
@@ -181,7 +185,7 @@ export function Purchases({
       await addPurchaseItem(newPurchase.id, {
         productId: matchedProduct?.id || `prod_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
         productName: item.name.trim(),
-        productBrand: item.brand || matchedProduct?.brand || '',
+        productBrand: normBrand || normalizeBrand(matchedProduct?.brand) || '',
         categoryId: categoryId,
         categoryName: foundCategory?.name || item.category || 'Mercearia',
         unit: item.unit,
@@ -200,8 +204,9 @@ export function Purchases({
     if (!selectedPurchaseId) return;
 
     for (const item of items) {
+      const normBrand = normalizeBrand(item.brand);
       let matchedProduct = products.find(
-        p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase()
+        p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase() && isSameBrand(p.brand, normBrand)
       );
 
       let categoryId = categories[0]?.id || 'cat_default';
@@ -218,12 +223,14 @@ export function Purchases({
             item.name.trim(),
             categoryId,
             item.unit,
-            item.brand || '',
+            normBrand,
             item.unitPrice,
             item.barcode
           );
         } catch (e) {
           matchedProduct = products.find(
+            p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase() && isSameBrand(p.brand, normBrand)
+          ) || products.find(
             p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase()
           );
         }
@@ -232,7 +239,7 @@ export function Purchases({
       await addPurchaseItem(selectedPurchaseId, {
         productId: matchedProduct?.id || `prod_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
         productName: item.name.trim(),
-        productBrand: item.brand || matchedProduct?.brand || '',
+        productBrand: normBrand || normalizeBrand(matchedProduct?.brand) || '',
         categoryId: categoryId,
         categoryName: foundCategory?.name || item.category || 'Mercearia',
         unit: item.unit,
@@ -322,8 +329,37 @@ export function Purchases({
   const [itemQuery, setItemQuery] = useState('');
   const [groupByCategory, setGroupByCategory] = useState(false);
 
-  // Complete purchase confirmation modal state
+  // Complete purchase confirmation and validation modal state
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
+  const [showZeroPriceValidationModal, setShowZeroPriceValidationModal] = useState(false);
+  const [zeroPriceModalItems, setZeroPriceModalItems] = useState<PurchaseItem[]>([]);
+  const [emptyCartValidationMessage, setEmptyCartValidationMessage] = useState<string | null>(null);
+  const [completePurchaseError, setCompletePurchaseError] = useState<string | null>(null);
+  const [isFinishingPurchase, setIsFinishingPurchase] = useState(false);
+
+  const handleInitiateFinishPurchase = () => {
+    if (!activePurchase) return;
+    const itemsInCart = activeItems.filter(item => item.isChecked);
+
+    if (itemsInCart.length === 0) {
+      setZeroPriceModalItems([]);
+      setEmptyCartValidationMessage('Nenhum item foi adicionado ao carrinho. Marque ao menos um item no carrinho para finalizar a compra.');
+      setShowZeroPriceValidationModal(true);
+      return;
+    }
+
+    const zeroPriced = itemsInCart.filter(item => !item.unitPrice || item.unitPrice <= 0);
+    if (zeroPriced.length > 0) {
+      setZeroPriceModalItems(zeroPriced);
+      setEmptyCartValidationMessage(null);
+      setShowZeroPriceValidationModal(true);
+      return;
+    }
+
+    // All cart items have valid prices (> 0)
+    setCompletePurchaseError(null);
+    setShowCompleteConfirm(true);
+  };
 
   // Safe UI deletion modals & feedback (replaces blocking window.confirm/alert)
   const [purchaseToDelete, setPurchaseToDelete] = useState<Purchase | null>(null);
@@ -543,11 +579,7 @@ export function Purchases({
       return;
     }
 
-    const cleanedBrand = sanitizeAndCapitalize(newProdBrand, 50);
-    if (!cleanedBrand || cleanedBrand.length < 2) {
-      setNewProdError('A marca recomendada é obrigatória (mínimo 2 caracteres).');
-      return;
-    }
+    const cleanedBrand = normalizeBrand(sanitizeAndCapitalize(newProdBrand, 30));
 
     const priceNum = newProdPrice.trim() ? parseMoneyToNumber(newProdPrice) : 0;
 
@@ -568,7 +600,7 @@ export function Purchases({
         await addPurchaseItem(activePurchase.id, {
           productId: createdProd.id,
           productName: createdProd.name,
-          productBrand: createdProd.brand || '',
+          productBrand: normalizeBrand(createdProd.brand),
           categoryId: createdProd.categoryId,
           categoryName: cat ? cat.name : 'Geral',
           unit: createdProd.unit,
@@ -600,7 +632,7 @@ export function Purchases({
     }
     const term = productSearchTerm.toLowerCase();
     return sortedProducts.filter(
-      p => p.name.toLowerCase().includes(term) || (p.brand && p.brand.toLowerCase().includes(term))
+      p => p.name.toLowerCase().includes(term) || (formatBrandDisplay(p.brand).toLowerCase().includes(term))
     );
   }, [sortedProducts, productSearchTerm]);
 
@@ -638,7 +670,7 @@ export function Purchases({
       await addPurchaseItem(selectedPurchaseId, {
         productId: prod.id,
         productName: prod.name,
-        productBrand: sanitizeAndCapitalize(itemBrand, 30) || prod.brand || '',
+        productBrand: normalizeBrand(sanitizeAndCapitalize(itemBrand, 30)) || normalizeBrand(prod.brand) || '',
         categoryId: prod.categoryId,
         categoryName: catName,
         unit: prod.unit,
@@ -729,7 +761,7 @@ export function Purchases({
       await addPurchaseItem(activePurchase.id, {
         productId: existingProduct.id,
         productName: existingProduct.name,
-        productBrand: existingProduct.brand,
+        productBrand: normalizeBrand(existingProduct.brand),
         categoryId: existingProduct.categoryId,
         categoryName: cat ? cat.name : 'Outros',
         unit: existingProduct.unit,
@@ -749,7 +781,7 @@ export function Purchases({
     }
 
     const prodName = data.suggestedName || `Produto ${data.barcode}`;
-    const prodBrand = data.suggestedBrand || '';
+    const prodBrand = normalizeBrand(data.suggestedBrand);
     const prodUnit = normalizeProductUnit(data.suggestedUnit || 'Un');
 
     try {
@@ -766,7 +798,7 @@ export function Purchases({
       await addPurchaseItem(activePurchase.id, {
         productId: createdProd.id,
         productName: createdProd.name,
-        productBrand: createdProd.brand,
+        productBrand: normalizeBrand(createdProd.brand),
         categoryId: createdProd.categoryId,
         categoryName: cat ? cat.name : 'Outros',
         unit: createdProd.unit,
@@ -1451,7 +1483,7 @@ export function Purchases({
                 {activePurchase.status === 'inProgress' ? (
                   <button
                     type="button"
-                    onClick={() => setShowCompleteConfirm(true)}
+                    onClick={handleInitiateFinishPurchase}
                     className="flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-sm transition-all active:scale-95"
                   >
                     <CheckCircle size={15} />
@@ -1706,9 +1738,10 @@ export function Purchases({
                             type="button"
                             onClick={() => {
                               setSelectedProductId(p.id);
-                              setProductSearchTerm(`${p.name}${p.brand ? ` (${p.brand})` : ''} - ${getUnitCardDisplay(p.unit)}`);
+                              const b = formatBrandDisplay(p.brand);
+                              setProductSearchTerm(`${p.name}${b ? ` (${b})` : ''} - ${getUnitCardDisplay(p.unit)}`);
                               setItemPrice(formatMoneyInput(p.lastPrice || 0));
-                              setItemBrand(p.brand || '');
+                              setItemBrand(b);
                               setIsProductDropdownOpen(false);
                             }}
                             className={`w-full text-left px-3 py-2.5 hover:bg-sky-50 transition-colors flex items-center justify-between gap-2 ${
@@ -1718,7 +1751,7 @@ export function Purchases({
                             <div>
                               <div className="text-xs font-bold text-neutral-900">{p.name}</div>
                               <div className="text-[10px] text-neutral-400">
-                                {p.brand ? `Marca: ${p.brand} • ` : ''}Unidade: {getUnitCardDisplay(p.unit)}
+                                {formatBrandDisplay(p.brand) ? `Marca: ${formatBrandDisplay(p.brand)} • ` : ''}Unidade: {getUnitCardDisplay(p.unit)}
                               </div>
                             </div>
                             <div className="text-right shrink-0">
@@ -1907,57 +1940,179 @@ export function Purchases({
         </div>
       )}
 
-      {/* Confirmation Modal for Completing Purchase */}
-      {showCompleteConfirm && activePurchase && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto overscroll-contain">
+      {/* Zero Price in Cart / Empty Cart Validation Modal */}
+      {showZeroPriceValidationModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto overscroll-contain animate-in fade-in">
           <div className="bg-white max-w-md w-full rounded-3xl p-5 sm:p-6 border border-neutral-200 shadow-2xl space-y-4 my-auto max-h-[90dvh] overflow-y-auto pb-12 sm:pb-6">
-            <div className="flex items-center gap-3 text-emerald-600">
-              <CheckCircle2 size={24} />
-              <h3 className="font-extrabold text-base text-neutral-950">Finalizar Lista de Compras</h3>
-            </div>
-            
-            <p className="text-xs text-neutral-600 leading-relaxed">
-              Você está prestes a concluir a compra <strong>"{activePurchase.name}"</strong> realizada no estabelecimento <strong>{activePurchase.market}</strong>.
-            </p>
-
-            <div className="p-3.5 bg-neutral-50 rounded-xl space-y-2 text-xs">
-              <div className="flex justify-between items-center font-bold">
-                <span className="text-neutral-600">Total da Sessão:</span>
-                <span className="text-base text-emerald-600 font-black">{formatCurrency(grandTotal)}</span>
+            <div className="flex items-center gap-3 text-red-600">
+              <div className="p-2.5 bg-red-50 text-red-600 rounded-2xl">
+                <AlertCircle size={24} />
               </div>
-              <div className="flex justify-between items-center text-neutral-500">
-                <span>Itens no Carrinho:</span>
-                <span className="font-bold text-neutral-700">{itemsInCart.length} de {activeItems.length} itens</span>
+              <div>
+                <h3 className="font-extrabold text-base text-neutral-950">
+                  {emptyCartValidationMessage ? 'Carrinho Vazio' : 'Itens com Valor Zerado no Carrinho'}
+                </h3>
+                <span className="text-[11px] font-semibold text-neutral-400">
+                  Ação necessária para finalizar a compra
+                </span>
               </div>
             </div>
 
-            <div className="p-3 bg-sky-50 border border-sky-200 rounded-xl text-[11px] text-sky-800 leading-relaxed">
-              💡 <strong>Atualização Inteligente do Catálogo:</strong> Ao finalizar, os preços unitários pagos nesta compra serão automaticamente sincronizados como o preço de referência no catálogo de produtos, mantendo seu histórico e relatórios sempre precisos.
-            </div>
+            {emptyCartValidationMessage ? (
+              <p className="text-xs text-neutral-600 leading-relaxed">
+                {emptyCartValidationMessage}
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-neutral-600 leading-relaxed">
+                  Para finalizar a compra, <strong>todos os itens adicionados ao carrinho devem possuir um valor unitário maior que R$ 0,00</strong>.
+                </p>
+                <div className="p-3.5 bg-red-50 border border-red-200 rounded-2xl space-y-2">
+                  <span className="text-xs font-bold text-red-800 block">
+                    O(s) seguinte(s) {zeroPriceModalItems.length} item(ns) estão com preço unitário R$ 0,00:
+                  </span>
+                  <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                    {zeroPriceModalItems.map(item => (
+                      <div key={item.id} className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-red-100 shadow-xs">
+                        <div className="min-w-0 pr-2">
+                          <span className="text-xs font-black text-neutral-900 block truncate">{item.productName}</span>
+                          <span className="text-[10px] text-neutral-400">Qtd: {item.quantity} {item.unit}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowZeroPriceValidationModal(false);
+                            setEditingItemId(item.id);
+                            setEditItemQty(String(item.quantity));
+                            setEditItemPrice('');
+                          }}
+                          className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg text-xs font-bold shrink-0 transition-colors"
+                        >
+                          Definir Preço
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  Clique em <strong>Definir Preço</strong> ou ajuste os valores diretamente na lista para continuar.
+                </p>
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setShowCompleteConfirm(false)}
-                className="px-4 py-2 text-xs font-bold text-neutral-600 hover:bg-neutral-100 rounded-xl transition-all"
+                onClick={() => setShowZeroPriceValidationModal(false)}
+                className="px-4 py-2 text-xs font-bold text-neutral-700 bg-neutral-100 hover:bg-neutral-200 rounded-xl transition-all"
               >
-                Continuar Editando
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  await completePurchase(activePurchase.id);
-                  setShowCompleteConfirm(false);
-                  setSelectedPurchaseId(null);
-                }}
-                className="px-5 py-2 text-xs font-black bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl shadow-sm transition-all"
-              >
-                Confirmar & Finalizar
+                Entendi, vou ajustar
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal for Completing Purchase */}
+      {showCompleteConfirm && activePurchase && (() => {
+        const inCart = activeItems.filter(item => item.isChecked);
+        const unpurchased = activeItems.filter(item => !item.isChecked);
+        const inCartTotal = inCart.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+        const discount = activePurchase.discount || 0;
+        const fee = activePurchase.additionalFee || 0;
+        const finalCalculatedTotal = Math.max(0, inCartTotal - discount + fee);
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto overscroll-contain animate-in fade-in">
+            <div className="bg-white max-w-md w-full rounded-3xl p-5 sm:p-6 border border-neutral-200 shadow-2xl space-y-4 my-auto max-h-[90dvh] overflow-y-auto pb-12 sm:pb-6">
+              <div className="flex items-center gap-3 text-emerald-600">
+                <CheckCircle2 size={24} />
+                <h3 className="font-extrabold text-base text-neutral-950">Finalizar Lista de Compras</h3>
+              </div>
+              
+              <p className="text-xs text-neutral-600 leading-relaxed">
+                Você está prestes a concluir a compra <strong>"{activePurchase.name}"</strong> realizada no estabelecimento <strong>{activePurchase.market}</strong>.
+              </p>
+
+              <div className="p-3.5 bg-neutral-50 rounded-xl space-y-2 text-xs">
+                <div className="flex justify-between items-center font-bold">
+                  <span className="text-neutral-600">Total da Sessão (Carrinho):</span>
+                  <span className="text-base text-emerald-600 font-black">{formatCurrency(finalCalculatedTotal)}</span>
+                </div>
+                <div className="flex justify-between items-center text-neutral-500">
+                  <span>Itens no Carrinho:</span>
+                  <span className="font-bold text-neutral-700">{inCart.length} de {activeItems.length} itens</span>
+                </div>
+              </div>
+
+              {/* Unpurchased items removal notice */}
+              {unpurchased.length > 0 && (
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5 text-xs text-amber-900">
+                  <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                    <AlertCircle size={15} className="shrink-0 text-amber-600" />
+                    <span>Itens fora do carrinho serão removidos ({unpurchased.length})</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    Ao confirmar a finalização, os seguintes <strong>{unpurchased.length} item(ns)</strong> que não foram adicionados ao carrinho serão <strong>removidos da lista</strong>:
+                  </p>
+                  <div className="max-h-24 overflow-y-auto bg-white/80 p-2 rounded-lg border border-amber-200/60 text-[11px] font-medium text-amber-950">
+                    {unpurchased.map(i => i.productName).join(', ')}
+                  </div>
+                </div>
+              )}
+
+              <div className="p-3 bg-sky-50 border border-sky-200 rounded-xl text-[11px] text-sky-800 leading-relaxed text-justify">
+                💡 <strong>Atualização Inteligente do Catálogo:</strong> Ao finalizar, os preços unitários pagos nesta compra serão automaticamente sincronizados como o preço de referência no catálogo de produtos, mantendo seu histórico e relatórios sempre precisos.
+              </div>
+
+              {completePurchaseError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs font-bold text-red-700 flex items-center gap-2">
+                  <AlertCircle size={16} className="shrink-0" />
+                  <span>{completePurchaseError}</span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCompleteConfirm(false)}
+                  disabled={isFinishingPurchase}
+                  className="px-4 py-2 text-xs font-bold text-neutral-600 hover:bg-neutral-100 rounded-xl transition-all"
+                >
+                  Continuar Editando
+                </button>
+                <button
+                  type="button"
+                  disabled={isFinishingPurchase}
+                  onClick={async () => {
+                    try {
+                      setIsFinishingPurchase(true);
+                      setCompletePurchaseError(null);
+                      await completePurchase(activePurchase.id);
+                      setShowCompleteConfirm(false);
+                      setSelectedPurchaseId(null);
+                    } catch (err: any) {
+                      setCompletePurchaseError(err.message || 'Erro ao finalizar a compra.');
+                    } finally {
+                      setIsFinishingPurchase(false);
+                    }
+                  }}
+                  className="px-5 py-2 text-xs font-black bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+                >
+                  {isFinishingPurchase ? (
+                    <>
+                      <RefreshCw size={13} className="animate-spin" />
+                      <span>Finalizando...</span>
+                    </>
+                  ) : (
+                    <span>Confirmar & Finalizar</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Duplicate Purchase Modal with Unique Name Validation */}
       {purchaseToDuplicate && (
@@ -2201,12 +2356,11 @@ export function Purchases({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
-                    Marca recomendada *
+                    Marca recomendada <span className="font-normal text-neutral-400">(opcional)</span>
                   </label>
                   <input
                     type="text"
-                    required
-                    placeholder="Ex: Camil, Nestlé..."
+                    placeholder="Ex: Camil, Nestlé (opcional)"
                     value={newProdBrand}
                     onChange={(e) => setNewProdBrand(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -2492,7 +2646,7 @@ export function Purchases({
 
               <button
                 type="button"
-                onClick={() => setShowCompleteConfirm(true)}
+                onClick={handleInitiateFinishPurchase}
                 className="flex items-center gap-1 px-3 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black shadow-sm transition-all"
               >
                 <CheckCircle size={14} />
@@ -2581,9 +2735,9 @@ export function Purchases({
               <span className="bg-sky-50 text-sky-500 px-1.5 py-0.5 rounded font-semibold">
                 {item.categoryName}
               </span>
-              {item.productBrand && (
-                <span className="text-neutral-600 font-medium">Marca: {item.productBrand}</span>
-              )}
+              {formatBrandDisplay(item.productBrand) ? (
+                <span className="text-neutral-600 font-medium">Marca: {formatBrandDisplay(item.productBrand)}</span>
+              ) : null}
               <span>•</span>
               <span>Unidade: {getUnitCardDisplay(item.unit)}</span>
 
@@ -2613,6 +2767,14 @@ export function Purchases({
                 }
                 return null;
               })()}
+
+              {/* Zero Price Warning on Item in Cart */}
+              {item.isChecked && (!item.unitPrice || item.unitPrice <= 0) && !isCompleted && (
+                <span className="inline-flex items-center gap-1 font-black text-[9px] text-red-700 bg-red-100 border border-red-300 px-2 py-0.5 rounded-full animate-pulse">
+                  <AlertCircle size={10} className="text-red-600 shrink-0" />
+                  Preço zerado (R$ 0,00)
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -2707,7 +2869,7 @@ export function Purchases({
               {/* Price details */}
               <div className="text-right">
                 <span className="text-[10px] text-neutral-400 block font-semibold">Unitário</span>
-                <span className="text-xs font-bold text-neutral-600">
+                <span className={`text-xs font-bold ${item.isChecked && (!item.unitPrice || item.unitPrice <= 0) && !isCompleted ? 'text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded font-black' : 'text-neutral-600'}`}>
                   {formatCurrency(item.unitPrice)}
                 </span>
               </div>

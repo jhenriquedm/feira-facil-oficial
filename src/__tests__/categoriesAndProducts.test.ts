@@ -84,4 +84,57 @@ describe('Business Rules & Integrity Checks', () => {
     expect(percentSpent).toBeCloseTo(39.2);
     expect(total <= budget).toBe(true);
   });
+
+  describe('Product Brand Optionality & Duplicity Rules', () => {
+    // Import logic dynamically or test imported utils directly
+    it('normalizes brand correctly and eliminates null/undefined variants', async () => {
+      const { normalizeBrand, formatBrandDisplay } = await import('../utils/brand');
+
+      expect(normalizeBrand(undefined)).toBe('');
+      expect(normalizeBrand(null as any)).toBe('');
+      expect(normalizeBrand('null')).toBe('');
+      expect(normalizeBrand('NULL')).toBe('');
+      expect(normalizeBrand('undefined')).toBe('');
+      expect(normalizeBrand('   ')).toBe('');
+      expect(normalizeBrand('N/A')).toBe('');
+      expect(normalizeBrand('-')).toBe('');
+      expect(normalizeBrand('  Camil  ')).toBe('Camil');
+
+      expect(formatBrandDisplay(undefined)).toBe('');
+      expect(formatBrandDisplay(null as any)).toBe('');
+      expect(formatBrandDisplay('null')).toBe('');
+      expect(formatBrandDisplay('Tio João')).toBe('Tio João');
+    });
+
+    it('enforces product duplicity rule according to user specification', async () => {
+      const { isProductDuplicate } = await import('../utils/brand');
+
+      const existingArrozTioJoao = { categoryId: 'cat-mercearia', name: 'Arroz', brand: 'Tio João' };
+      const existingArrozCamil = { categoryId: 'cat-mercearia', name: 'Arroz', brand: 'Camil' };
+      const existingArrozSemMarca = { categoryId: 'cat-mercearia', name: 'Arroz', brand: '' };
+
+      // 1. Same name + same category + same brand -> DUPLICATE (Nunca dois de marcas iguais)
+      expect(isProductDuplicate(existingArrozTioJoao, { categoryId: 'cat-mercearia', name: 'Arroz', brand: 'Tio João' })).toBe(true);
+      expect(isProductDuplicate(existingArrozTioJoao, { categoryId: 'cat-mercearia', name: 'arroz', brand: 'tio joao' })).toBe(true);
+
+      // 2. Same name + same category + different brand -> ALLOWED (Dois com marcas diferentes)
+      expect(isProductDuplicate(existingArrozTioJoao, { categoryId: 'cat-mercearia', name: 'Arroz', brand: 'Camil' })).toBe(false);
+      expect(isProductDuplicate(existingArrozCamil, { categoryId: 'cat-mercearia', name: 'Arroz', brand: 'Tio João' })).toBe(false);
+
+      // 3. Same name + same category + one with brand, one without brand -> ALLOWED
+      expect(isProductDuplicate(existingArrozTioJoao, { categoryId: 'cat-mercearia', name: 'Arroz', brand: '' })).toBe(false);
+      expect(isProductDuplicate(existingArrozSemMarca, { categoryId: 'cat-mercearia', name: 'Arroz', brand: 'Tio João' })).toBe(false);
+
+      // 4. Same name + same category + BOTH without brand -> DUPLICATE (Nunca dois sem marca)
+      expect(isProductDuplicate(existingArrozSemMarca, { categoryId: 'cat-mercearia', name: 'Arroz', brand: '' })).toBe(true);
+      expect(isProductDuplicate(existingArrozSemMarca, { categoryId: 'cat-mercearia', name: 'Arroz', brand: undefined })).toBe(true);
+      expect(isProductDuplicate(existingArrozSemMarca, { categoryId: 'cat-mercearia', name: 'Arroz', brand: 'null' })).toBe(true);
+
+      // 5. Different category -> ALLOWED even if same name and both without brand
+      expect(isProductDuplicate(existingArrozSemMarca, { categoryId: 'cat-graos', name: 'Arroz', brand: '' })).toBe(false);
+
+      // 6. Different product name -> ALLOWED
+      expect(isProductDuplicate(existingArrozTioJoao, { categoryId: 'cat-mercearia', name: 'Feijão', brand: 'Tio João' })).toBe(false);
+    });
+  });
 });

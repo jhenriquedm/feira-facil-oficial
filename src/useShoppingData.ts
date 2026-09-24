@@ -32,6 +32,7 @@ import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { Category, Product, Purchase, PurchaseItem, UserProfile } from './types';
 import { DEFAULT_CATEGORIES, DEFAULT_PRODUCTS } from './defaultData';
 import { isValidCPF } from './utils/textFormatters';
+import { normalizeBrand, isProductDuplicate } from './utils/brand';
 import { Capacitor } from '@capacitor/core';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 
@@ -130,6 +131,25 @@ export function useShoppingData() {
     return saved ? JSON.parse(saved) : defaultValue;
   };
 
+  // Helper to batch-write products to Firestore without exceeding operation limits
+  const seedProductsInFirestore = async (uid: string, prods: Product[]) => {
+    const CHUNK_SIZE = 250;
+    for (let i = 0; i < prods.length; i += CHUNK_SIZE) {
+      const batch = writeBatch(db);
+      const chunk = prods.slice(i, i + CHUNK_SIZE);
+      chunk.forEach((prod) => {
+        const prodRef = doc(db, 'users', uid, 'products', prod.id);
+        batch.set(prodRef, {
+          ...prod,
+          userId: uid,
+          createdAt: prod.createdAt || new Date().toISOString(),
+          updatedAt: prod.updatedAt || new Date().toISOString()
+        });
+      });
+      await batch.commit();
+    }
+  };
+
   // Auth monitoring & data loading
   useEffect(() => {
     // Helper to load offline session data
@@ -146,7 +166,13 @@ export function useShoppingData() {
             localCats = DEFAULT_CATEGORIES(parsed.uid);
             saveUserData('categories', localCats, parsed.uid);
           }
-          const localProds = loadUserData<Product[]>('products', [], parsed.uid);
+          let localProds = loadUserData<Product[]>('products', [], parsed.uid);
+          const isProdsInit = localStorage.getItem(`feira_products_initialized_${parsed.uid}`);
+          if (!isProdsInit && (!localProds || localProds.length === 0)) {
+            localProds = DEFAULT_PRODUCTS(parsed.uid);
+            saveUserData('products', localProds, parsed.uid);
+            localStorage.setItem(`feira_products_initialized_${parsed.uid}`, 'true');
+          }
           const localPurchases = loadUserData<Purchase[]>('purchases', [], parsed.uid);
           const localItems = loadUserData<Record<string, PurchaseItem[]>>('purchase_items', {}, parsed.uid);
           const localProfile = loadUserData('user_profile', {
@@ -178,8 +204,20 @@ export function useShoppingData() {
       if (!loaded) {
         setUser(null);
         setUserProfile(null);
-        setCategories(DEFAULT_CATEGORIES('guest'));
-        setProducts([]);
+        let defaultCats = loadUserData<Category[]>('categories', [], 'guest');
+        if (!defaultCats || defaultCats.length === 0) {
+          defaultCats = DEFAULT_CATEGORIES('guest');
+          saveUserData('categories', defaultCats, 'guest');
+        }
+        let defaultProds = loadUserData<Product[]>('products', [], 'guest');
+        const initialized = localStorage.getItem('feira_products_initialized_guest');
+        if (!initialized && (!defaultProds || defaultProds.length === 0)) {
+          defaultProds = DEFAULT_PRODUCTS('guest');
+          saveUserData('products', defaultProds, 'guest');
+          localStorage.setItem('feira_products_initialized_guest', 'true');
+        }
+        setCategories(defaultCats);
+        setProducts(defaultProds);
         setPurchases([]);
         setPurchaseItems({});
         setLoading(false);
@@ -352,6 +390,31 @@ export function useShoppingData() {
               } catch (migErr) {
                 console.warn("Legacy products migration check skipped:", migErr);
               }
+
+              // Check if user has had products seeded before:
+              let profileData: UserProfile | undefined;
+              try {
+                const uDoc = await getDoc(userDocRef);
+                if (uDoc.exists()) {
+                  profileData = uDoc.data() as UserProfile;
+                }
+              } catch (e) {
+                console.warn("Could not check user profile productsSeeded flag:", e);
+              }
+
+              if (!profileData?.productsSeeded) {
+                const defaultProds = DEFAULT_PRODUCTS(uid);
+                setProducts(defaultProds);
+                saveUserData('products', defaultProds, uid);
+                localStorage.setItem(`feira_products_initialized_${uid}`, 'true');
+                try {
+                  await seedProductsInFirestore(uid, defaultProds);
+                  await setDoc(userDocRef, { productsSeeded: true }, { merge: true });
+                } catch (seedErr) {
+                  console.warn("Auto-seeding default products notice:", seedErr);
+                }
+                return;
+              }
             }
             const prods: Product[] = [];
             snapshot.forEach((doc) => prods.push({ ...doc.data(), id: doc.id } as Product));
@@ -443,8 +506,20 @@ export function useShoppingData() {
         if (!loaded) {
           setUser(null);
           setUserProfile(null);
-          setCategories(DEFAULT_CATEGORIES('guest'));
-          setProducts([]);
+          let defaultCats = loadUserData<Category[]>('categories', [], 'guest');
+          if (!defaultCats || defaultCats.length === 0) {
+            defaultCats = DEFAULT_CATEGORIES('guest');
+            saveUserData('categories', defaultCats, 'guest');
+          }
+          let defaultProds = loadUserData<Product[]>('products', [], 'guest');
+          const initialized = localStorage.getItem('feira_products_initialized_guest');
+          if (!initialized && (!defaultProds || defaultProds.length === 0)) {
+            defaultProds = DEFAULT_PRODUCTS('guest');
+            saveUserData('products', defaultProds, 'guest');
+            localStorage.setItem('feira_products_initialized_guest', 'true');
+          }
+          setCategories(defaultCats);
+          setProducts(defaultProds);
           setPurchases([]);
           setPurchaseItems({});
           setLoading(false);
@@ -596,7 +671,30 @@ export function useShoppingData() {
     const userProductsRef = collection(db, 'users', uid, 'products');
     const unsubProducts = onSnapshot(
       userProductsRef,
-      (snapshot) => {
+      async (snapshot) => {
+        if (snapshot.empty) {
+          let profileData: UserProfile | undefined;
+          try {
+            const uDoc = await getDoc(userDocRef);
+            if (uDoc.exists()) {
+              profileData = uDoc.data() as UserProfile;
+            }
+          } catch (_) {}
+
+          if (!profileData?.productsSeeded) {
+            const defaultProds = DEFAULT_PRODUCTS(uid);
+            setProducts(defaultProds);
+            saveUserData('products', defaultProds, uid);
+            localStorage.setItem(`feira_products_initialized_${uid}`, 'true');
+            try {
+              await seedProductsInFirestore(uid, defaultProds);
+              await setDoc(userDocRef, { productsSeeded: true }, { merge: true });
+            } catch (seedErr) {
+              console.warn("Auto-seeding products notice:", seedErr);
+            }
+            return;
+          }
+        }
         const prods: Product[] = [];
         snapshot.forEach((d) => prods.push({ id: d.id, ...d.data() } as Product));
         prods.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
@@ -604,7 +702,13 @@ export function useShoppingData() {
         saveUserData('products', prods, uid);
       },
       () => {
-        const local = loadUserData('products', [], uid);
+        let local = loadUserData<Product[]>('products', [], uid);
+        const initialized = localStorage.getItem(`feira_products_initialized_${uid}`);
+        if (!initialized && (!local || local.length === 0)) {
+          local = DEFAULT_PRODUCTS(uid);
+          saveUserData('products', local, uid);
+          localStorage.setItem(`feira_products_initialized_${uid}`, 'true');
+        }
         local.sort((a: Product, b: Product) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
         setProducts(local);
       }
@@ -736,6 +840,8 @@ export function useShoppingData() {
           finalProfile.cpf = cleanCpfDigits;
         }
         
+        finalProfile.productsSeeded = true;
+        finalProfile.categoriesSeeded = true;
         await setDoc(doc(db, 'users', finalUid), cleanPayload(finalProfile), { merge: true });
         
         // Seed the 9 default categories in user's subcollection /users/{finalUid}/categories
@@ -753,10 +859,16 @@ export function useShoppingData() {
         });
         await batch.commit();
 
+        // Seed the 180 predefined default products in user's subcollection /users/{finalUid}/products
+        const defaultProds = DEFAULT_PRODUCTS(finalUid);
+        await seedProductsInFirestore(finalUid, defaultProds);
+
         // Save local record with Firebase UID
         const localUpdated = [...existingLocal.filter(u => u.email !== cleanedEmail), finalProfile];
         saveLocalUsers(localUpdated);
         saveUserData('categories', defaultCats, finalUid);
+        saveUserData('products', defaultProds, finalUid);
+        localStorage.setItem(`feira_products_initialized_${finalUid}`, 'true');
         saveUserData('user_profile', finalProfile, finalUid);
 
         localStorage.setItem('feira_offline_session', JSON.stringify({
@@ -770,6 +882,7 @@ export function useShoppingData() {
         setUser(activeFirebaseUser);
         setUserProfile(finalProfile);
         setCategories(defaultCats);
+        setProducts(defaultProds);
         setThemeColor('#0284c7');
         setupUserDataListeners(finalUid, cleanedName, cleanedEmail);
       } catch (err: any) {
@@ -800,9 +913,12 @@ export function useShoppingData() {
       }
 
       const defaultCats = DEFAULT_CATEGORIES(uid);
+      const defaultProds = DEFAULT_PRODUCTS(uid);
       const updatedLocalUsers = [...existingLocal, newProfile];
       saveLocalUsers(updatedLocalUsers);
       saveUserData('categories', defaultCats, uid);
+      saveUserData('products', defaultProds, uid);
+      localStorage.setItem(`feira_products_initialized_${uid}`, 'true');
       saveUserData('user_profile', newProfile, uid);
 
       const activeOfflineUser: OfflineUser = {
@@ -814,6 +930,7 @@ export function useShoppingData() {
       setUser(activeOfflineUser);
       setUserProfile(newProfile);
       setCategories(defaultCats);
+      setProducts(defaultProds);
       setThemeColor('#0284c7');
       localStorage.setItem('feira_active_offline_session', JSON.stringify(activeOfflineUser));
       localStorage.setItem('feira_offline_session', JSON.stringify({
@@ -918,11 +1035,21 @@ export function useShoppingData() {
       if (isOnline) {
         setupUserDataListeners(matchedUser.id, matchedUser.name, matchedUser.email);
       } else {
-        const cats = loadUserData('categories', [], matchedUser.id);
+        let cats = loadUserData<Category[]>('categories', [], matchedUser.id);
+        if (!cats || cats.length === 0) {
+          cats = DEFAULT_CATEGORIES(matchedUser.id);
+          saveUserData('categories', cats, matchedUser.id);
+        }
         cats.sort((a: Category, b: Category) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
         setCategories(cats);
 
-        const prods = loadUserData('products', [], matchedUser.id);
+        let prods = loadUserData<Product[]>('products', [], matchedUser.id);
+        const initialized = localStorage.getItem(`feira_products_initialized_${matchedUser.id}`);
+        if (!initialized && (!prods || prods.length === 0)) {
+          prods = DEFAULT_PRODUCTS(matchedUser.id);
+          saveUserData('products', prods, matchedUser.id);
+          localStorage.setItem(`feira_products_initialized_${matchedUser.id}`, 'true');
+        }
         prods.sort((a: Product, b: Product) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
         setProducts(prods);
 
@@ -1075,6 +1202,7 @@ export function useShoppingData() {
         firebaseUser = userCredential.user;
       } else {
         const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
         const userCredential = await signInWithPopup(auth, provider);
         firebaseUser = userCredential.user;
       }
@@ -1102,6 +1230,8 @@ export function useShoppingData() {
             cpf: localUser?.cpf || undefined,
             photoURL: firebaseUser.photoURL || localUser?.photoURL || undefined,
             color: localUser?.color || '#0284c7',
+            productsSeeded: true,
+            categoriesSeeded: true,
             createdAt: nowIso,
             updatedAt: nowIso
           };
@@ -1115,8 +1245,16 @@ export function useShoppingData() {
           });
           await batch.commit();
 
+          const defaultProds = DEFAULT_PRODUCTS(firebaseUser.uid);
+          await seedProductsInFirestore(firebaseUser.uid, defaultProds);
+
           setUserProfile(newProfile);
           saveUserData('user_profile', newProfile, firebaseUser.uid);
+          saveUserData('categories', defaultCats, firebaseUser.uid);
+          saveUserData('products', defaultProds, firebaseUser.uid);
+          localStorage.setItem(`feira_products_initialized_${firebaseUser.uid}`, 'true');
+          setCategories(defaultCats);
+          setProducts(defaultProds);
         } else {
           const existingData = docSnap.data() as UserProfile;
           const mergedProfile: UserProfile = {
@@ -1131,10 +1269,25 @@ export function useShoppingData() {
           saveUserData('user_profile', mergedProfile, firebaseUser.uid);
         }
       } catch (googleSyncErr) {
-        console.error("Google user Firestore init error:", googleSyncErr);
+        console.warn("Google user Firestore init warning:", googleSyncErr);
       }
-    } catch (error) {
+    } catch (error: any) {
+      const code = error?.code || error?.message || '';
+      if (
+        code.includes('auth/popup-closed-by-user') ||
+        code.includes('auth/cancelled-popup-request') ||
+        code.includes('popup-closed-by-user') ||
+        code.includes('cancelled-popup-request')
+      ) {
+        // User closed or dismissed Google login popup - silent return without noisy console errors
+        return;
+      }
+      if (code.includes('auth/popup-blocked') || code.includes('popup-blocked')) {
+        console.warn("Pop-up do Google bloqueado pelo navegador.");
+        throw new Error("A janela de autenticação do Google foi bloqueada pelo navegador. Permita pop-ups neste site para entrar com o Google.");
+      }
       console.error("Erro ao autenticar com Google:", error);
+      throw error;
     } finally {
       setIsSyncing(false);
     }
@@ -1441,11 +1594,16 @@ export function useShoppingData() {
           const ref = doc(db, 'users', uid, 'categories', cat.id);
           batch.set(ref, cat);
         });
-        defaultProds.forEach((prod) => {
-          const ref = doc(db, 'users', uid, 'products', prod.id);
-          batch.set(ref, prod);
-        });
         await batch.commit();
+
+        await seedProductsInFirestore(uid, defaultProds);
+        await setDoc(doc(db, 'users', uid), { productsSeeded: true }, { merge: true });
+
+        setCategories(defaultCats);
+        setProducts(defaultProds);
+        saveUserData('categories', defaultCats, uid);
+        saveUserData('products', defaultProds, uid);
+        localStorage.setItem(`feira_products_initialized_${uid}`, 'true');
       } catch (error) {
         console.error("Erro ao semear dados no Firestore:", error);
         throw error;
@@ -1458,6 +1616,14 @@ export function useShoppingData() {
       setProducts(defaultProds);
       saveUserData('categories', defaultCats, user.uid);
       saveUserData('products', defaultProds, user.uid);
+      localStorage.setItem(`feira_products_initialized_${user.uid}`, 'true');
+    } else {
+      // Guest mode seeding
+      setCategories(defaultCats);
+      setProducts(defaultProds);
+      saveUserData('categories', defaultCats, 'guest');
+      saveUserData('products', defaultProds, 'guest');
+      localStorage.setItem('feira_products_initialized_guest', 'true');
     }
   }, [user]);
 
@@ -1764,7 +1930,7 @@ export function useShoppingData() {
       throw new Error("O nome do produto deve possuir entre 2 e 50 caracteres.");
     }
 
-    const cleanedBrand = brand.replace(/\s+/g, ' ').trim();
+    const cleanedBrand = normalizeBrand(brand);
     if (cleanedBrand && cleanedBrand.length > 30) {
       throw new Error("A marca do produto não deve ultrapassar 30 caracteres.");
     }
@@ -1795,13 +1961,22 @@ export function useShoppingData() {
       throw new Error("O preço do produto não pode ser negativo.");
     }
 
-    // Unique product name within the SAME category (RN-PRO-002)
-    const productExists = products.some(p => 
-      p.categoryId === categoryId && 
-      p.name.toLowerCase() === cleanedName.toLowerCase()
+    // Regra contra duplicidade:
+    // Podem existir dois ou mais produtos com o mesmo nome (ex: Arroz) na mesma categoria,
+    // desde que tenham marcas diferentes (nunca dois com marcas iguais),
+    // ou um sem marca (nunca dois sem marca na mesma categoria).
+    const duplicate = products.find(p => 
+      isProductDuplicate(
+        { categoryId: p.categoryId, name: p.name, brand: p.brand },
+        { categoryId, name: cleanedName, brand: cleanedBrand }
+      )
     );
-    if (productExists) {
-      throw new Error(`Já existe um produto chamado "${cleanedName}" cadastrado nesta mesma categoria.`);
+    if (duplicate) {
+      if (!cleanedBrand) {
+        throw new Error(`Já existe um produto chamado "${cleanedName}" sem marca cadastrado nesta mesma categoria.`);
+      } else {
+        throw new Error(`Já existe um produto chamado "${cleanedName}" da marca "${cleanedBrand}" cadastrado nesta mesma categoria.`);
+      }
     }
 
     const newProd: Product = {
@@ -1835,7 +2010,7 @@ export function useShoppingData() {
       throw new Error("O nome do produto deve possuir entre 2 e 50 caracteres.");
     }
 
-    const cleanedBrand = data.brand !== undefined ? data.brand.replace(/\s+/g, ' ').trim() : undefined;
+    const cleanedBrand = data.brand !== undefined ? normalizeBrand(data.brand) : undefined;
     if (cleanedBrand && cleanedBrand.length > 30) {
       throw new Error("A marca do produto não deve ultrapassar 30 caracteres.");
     }
@@ -1858,15 +2033,24 @@ export function useShoppingData() {
       throw new Error("O preço do produto não pode ser negativo.");
     }
 
-    // Unique product name within the SAME category excluding currently editing ID (RN-PRO-002)
-    if (cleanedName !== undefined) {
-      const productExists = products.some(p => 
+    const existingCurrent = products.find(p => p.id === id);
+    const targetName = cleanedName !== undefined ? cleanedName : existingCurrent?.name;
+    const targetBrand = cleanedBrand !== undefined ? cleanedBrand : (existingCurrent?.brand || '');
+
+    if (targetName && targetCategoryId) {
+      const duplicate = products.find(p => 
         p.id !== id &&
-        p.categoryId === targetCategoryId && 
-        p.name.toLowerCase() === cleanedName.toLowerCase()
+        isProductDuplicate(
+          { categoryId: p.categoryId, name: p.name, brand: p.brand },
+          { categoryId: targetCategoryId, name: targetName, brand: targetBrand }
+        )
       );
-      if (productExists) {
-        throw new Error(`Já existe outro produto chamado "${cleanedName}" cadastrado nesta mesma categoria.`);
+      if (duplicate) {
+        if (!targetBrand) {
+          throw new Error(`Já existe outro produto chamado "${targetName}" sem marca cadastrado nesta mesma categoria.`);
+        } else {
+          throw new Error(`Já existe outro produto chamado "${targetName}" da marca "${targetBrand}" cadastrado nesta mesma categoria.`);
+        }
       }
     }
 
@@ -2320,10 +2504,58 @@ export function useShoppingData() {
 
   const completePurchase = async (purchaseId: string) => {
     const itemsList = purchaseItems[purchaseId] || [];
-    await updatePurchase(purchaseId, { status: 'completed' });
+    const itemsInCart = itemsList.filter(item => item.isChecked);
+    const unpurchasedItems = itemsList.filter(item => !item.isChecked);
 
-    // Update catalog last prices and brands (RN-COM-006)
-    for (const item of itemsList) {
+    if (itemsInCart.length === 0) {
+      throw new Error("Nenhum item foi adicionado ao carrinho. Marque ao menos um item no carrinho para finalizar a compra.");
+    }
+
+    const zeroPricedItems = itemsInCart.filter(item => !item.unitPrice || item.unitPrice <= 0);
+    if (zeroPricedItems.length > 0) {
+      const names = zeroPricedItems.map(i => i.productName).join(', ');
+      throw new Error(`Não é possível finalizar a compra com itens zerados no carrinho: ${names}. Defina um valor maior que R$ 0,00.`);
+    }
+
+    const uid = user ? user.uid : 'guest';
+
+    // 1. Remove items not added to the cart from Firestore
+    if (isOnline && user && !('isOffline' in user) && unpurchasedItems.length > 0) {
+      try {
+        const batch = writeBatch(db);
+        unpurchasedItems.forEach(item => {
+          const itemRef = doc(db, 'users', uid, 'purchases', purchaseId, 'items', item.id);
+          batch.delete(itemRef);
+        });
+        await batch.commit();
+      } catch (err) {
+        console.warn("Erro ao deletar itens não adicionados ao carrinho no Firestore:", err);
+      }
+    }
+
+    // 2. Keep only items in cart in state and local storage
+    const remainingItems = itemsInCart;
+    const finalItemsTotal = remainingItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+
+    const pur = purchases.find(p => p.id === purchaseId);
+    const discount = pur?.discount || 0;
+    const fee = pur?.additionalFee || 0;
+    const grandTotal = Math.max(0, finalItemsTotal - discount + fee);
+
+    setPurchaseItems(prev => {
+      const allItems = { ...prev, [purchaseId]: remainingItems };
+      if (user) saveUserData('purchase_items', allItems, user.uid);
+      return allItems;
+    });
+
+    // 3. Mark purchase as completed and save recalculated total
+    await updatePurchase(purchaseId, {
+      status: 'completed',
+      total: grandTotal
+    });
+
+    // 4. Update catalog last prices and brands for purchased items (RN-COM-006)
+    for (const item of remainingItems) {
       if (item.unitPrice > 0) {
         await updateProduct(item.productId, {
           lastPrice: item.unitPrice,

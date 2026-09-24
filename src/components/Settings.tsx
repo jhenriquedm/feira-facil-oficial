@@ -1,10 +1,10 @@
 import React, { useState, useRef } from 'react';
 import { 
-  Trash2, Sliders, ShieldAlert, Play, Download, Upload, HardDrive, 
-  Store, AlertTriangle, CheckCircle2, Info, Smartphone,
+  Trash2, Sliders, ShieldAlert, Download, Upload, HardDrive, 
+  AlertTriangle, CheckCircle2, Info, Smartphone,
   Layers, Package, Check, ChevronDown, ChevronUp, Sparkles
 } from 'lucide-react';
-import { Category, Product, Purchase, PurchaseItem, PurchaseType, PURCHASE_TYPE_LABELS } from '../types';
+import { Category, Product, Purchase, PurchaseItem } from '../types';
 import { APP_VERSION_INFO } from '../version';
 
 interface SettingsProps {
@@ -16,7 +16,7 @@ interface SettingsProps {
   purchaseItems?: Record<string, PurchaseItem[]>;
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
-  seedDefaults: () => Promise<void>;
+  seedDefaults?: () => Promise<void>;
   syncGuestDataToAccount: () => Promise<void>;
   clearAllData: () => Promise<void>;
   importBackup?: (data: {
@@ -74,24 +74,12 @@ export function Settings({
   isOnline,
   onNavigate
 }: SettingsProps) {
-  const [seeding, setSeeding] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
-
-  // Default app preferences stored in localStorage
-  const [defaultMarket, setDefaultMarket] = useState(() => {
-    return localStorage.getItem('feira_pref_default_market') || '';
-  });
-  const [defaultPurchaseType, setDefaultPurchaseType] = useState<PurchaseType>(() => {
-    return (localStorage.getItem('feira_pref_default_type') as PurchaseType) || 'monthly';
-  });
-  const [autoBarcodeScan, setAutoBarcodeScan] = useState(() => {
-    return localStorage.getItem('feira_pref_auto_barcode') === 'true';
-  });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -104,27 +92,6 @@ export function Settings({
       setSuccessMsg(msg);
       setErrorMsg('');
       setTimeout(() => setSuccessMsg(''), 3000);
-    }
-  };
-
-  const handleSavePreferences = (e: React.FormEvent) => {
-    e.preventDefault();
-    localStorage.setItem('feira_pref_default_market', defaultMarket);
-    localStorage.setItem('feira_pref_default_type', defaultPurchaseType);
-    localStorage.setItem('feira_pref_auto_barcode', String(autoBarcodeScan));
-    showNotification('Preferências operacionais salvas com sucesso!');
-  };
-
-  const handleSeed = async () => {
-    setSeeding(true);
-    try {
-      await seedDefaults();
-      showNotification('Dados de demonstração carregados com sucesso!');
-    } catch (err: any) {
-      console.error(err);
-      showNotification('Erro ao carregar dados de demonstração: ' + (err.message || ''), true);
-    } finally {
-      setSeeding(false);
     }
   };
 
@@ -171,8 +138,8 @@ export function Settings({
           updatedAt: userProfile.updatedAt
         } : null,
         preferences: {
-          defaultMarket: localStorage.getItem('feira_pref_default_market') || defaultMarket,
-          defaultPurchaseType: localStorage.getItem('feira_pref_default_type') || defaultPurchaseType,
+          defaultMarket: localStorage.getItem('feira_pref_default_market') || '',
+          defaultPurchaseType: localStorage.getItem('feira_pref_default_type') || 'monthly',
           autoBarcodeScan: localStorage.getItem('feira_pref_auto_barcode') === 'true',
           themeMode,
           themeColor
@@ -349,104 +316,7 @@ export function Settings({
         </div>
       </div>
 
-      {/* SECTION 2: Operational Preferences */}
-      <div className="bg-white p-5 sm:p-6 rounded-3xl border border-neutral-200/90 shadow-sm space-y-4">
-        <h3 className="font-black text-sm text-neutral-900 flex items-center gap-2">
-          <Store size={16} className="text-sky-500" />
-          Padrões & Preferências de Compras
-        </h3>
-        <p className="text-xs text-neutral-500">
-          Defina valores padrão pré-preenchidos para agilizar a criação de novas sessões de feira.
-        </p>
-
-        <form onSubmit={handleSavePreferences} className="space-y-4 pt-1">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-neutral-500 mb-1">
-                Supermercado Preferencial Padrão
-              </label>
-              <input
-                type="text"
-                placeholder="Ex: Pão de Açúcar, Assaí, Atacadão"
-                value={defaultMarket}
-                onChange={(e) => setDefaultMarket(e.target.value)}
-                className="w-full px-3 py-2 text-base sm:text-sm bg-white border border-neutral-200 rounded-xl text-neutral-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-neutral-500 mb-1">
-                Tipo de Compra Padrão
-              </label>
-              <select
-                value={defaultPurchaseType}
-                onChange={(e) => setDefaultPurchaseType(e.target.value as PurchaseType)}
-                className="w-full px-3 py-2 text-base sm:text-sm bg-white border border-neutral-200 rounded-xl text-neutral-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
-              >
-                <option value="butcher">Açougue</option>
-                <option value="emergency">Emergencial</option>
-                <option value="pharmacy">Farmácia</option>
-                <option value="monthly">Mensal</option>
-                <option value="other">Outros</option>
-                <option value="weekly">Semanal</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 pt-1">
-            <input
-              type="checkbox"
-              id="pref-auto-barcode"
-              checked={autoBarcodeScan}
-              onChange={(e) => setAutoBarcodeScan(e.target.checked)}
-              className="h-4 w-4 rounded border-neutral-300 text-sky-600 focus:ring-sky-500"
-            />
-            <label htmlFor="pref-auto-barcode" className="text-xs font-semibold text-neutral-700 cursor-pointer">
-              Sugerir leitura de código de barras por padrão ao adicionar novos itens no carrinho
-            </label>
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              className="px-5 py-2.5 bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-xs font-black shadow-xs transition-all active:scale-95"
-            >
-              Salvar Preferências
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* SECTION 3: Demonstration Seeder */}
-      <div className="bg-white p-5 sm:p-6 rounded-3xl border border-neutral-200/90 shadow-sm space-y-4">
-        <h3 className="font-black text-sm text-neutral-900 flex items-center gap-2">
-          <Play size={16} className="text-sky-500" />
-          Dados de Demonstração (Seed)
-        </h3>
-        <p className="text-xs text-neutral-500 leading-relaxed text-justify">
-          Carregue uma paleta completa de categorias e produtos pré-configurados de supermercado brasileiro (Hortifruti, Açougue, Laticínios, Mercearia, Limpeza) com unidades de medida e preços de referência para testar o sistema.
-        </p>
-
-        <button
-          onClick={handleSeed}
-          disabled={seeding}
-          className="flex items-center justify-center gap-2 px-5 py-2.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-xs transition-all active:scale-95"
-        >
-          {seeding ? (
-            <>
-              <span className="inline-block animate-spin mr-1">⏳</span>
-              <span>Carregando Demonstração...</span>
-            </>
-          ) : (
-            <>
-              <Play size={14} />
-              <span>Preencher com Dados de Exemplo</span>
-            </>
-          )}
-        </button>
-      </div>
-
-      {/* SECTION 4: App Version & Android APK Info */}
+      {/* SECTION 2: App Version & Android APK Info */}
       <div className="bg-white p-5 sm:p-6 rounded-3xl border border-neutral-200/90 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="font-black text-sm text-neutral-900 flex items-center gap-2">

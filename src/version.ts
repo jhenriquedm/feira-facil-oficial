@@ -14,14 +14,34 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.3.1',
-  buildNumber: 14,
+  version: '1.3.3',
+  buildNumber: 16,
   releaseDate: '2026-09-23',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.mindflow.mercadofacil',
   changelog: [
+    {
+      version: '1.3.3',
+      date: '2026-09-23',
+      highlights: [
+        'Catálogo pré-definido com 180 produtos fixos distribuídos pelas 9 categorias padrão (Açougue, Bebidas, Higiene & Beleza, Hortifruti, Laticínios & Ovos, Limpeza, Mercearia, Outros e Padaria)',
+        'Atribuição automática dos itens básicos (Nome, Categoria e Unidade de Medida) ao instalar o app ou criar uma nova conta',
+        'Liberdade total para o usuário editar ou apagar qualquer item da sua lista',
+        'Restauração automática ao estado original de 180 itens em caso de reinstalação limpa sem dados na nuvem ou local'
+      ]
+    },
+    {
+      version: '1.3.2',
+      date: '2026-09-23',
+      highlights: [
+        'Marca opcional no cadastro de produtos (manual, leitor de código de barras e cupom fiscal OCR)',
+        'Tratamento preventivo para garantir que marcas ausentes nunca sejam exibidas como "null" ou "undefined"',
+        'Nova regra refinada contra duplicidade: permite produtos com o mesmo nome na mesma categoria com marcas distintas ou um sem marca',
+        'Impedimento estrito contra duplicidade de produtos com mesma marca ou múltiplos sem marca na mesma categoria'
+      ]
+    },
     {
       version: '1.3.1',
       date: '2026-09-23',

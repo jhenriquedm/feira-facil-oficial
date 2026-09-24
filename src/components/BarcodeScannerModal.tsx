@@ -6,6 +6,7 @@ import {
   Image as ImageIcon, Smartphone, Edit3
 } from 'lucide-react';
 import { normalizeProductUnit, getUnitLabel } from '../utils/units';
+import { normalizeBrand, formatBrandDisplay } from '../utils/brand';
 
 interface BarcodeScannerModalProps {
   isOpen: boolean;
@@ -90,7 +91,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         setDetectedResult({
           barcode: clean,
           name: data.name || '',
-          brand: data.brand || '',
+          brand: normalizeBrand(data.brand),
           category: data.categorySuggestion || '',
           unit: data.unit || 'Unidade',
           found: Boolean(data.found),
@@ -241,7 +242,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     onDetected({
       barcode: detectedResult.barcode,
       suggestedName: detectedResult.name,
-      suggestedBrand: detectedResult.brand,
+      suggestedBrand: normalizeBrand(detectedResult.brand),
       suggestedCategory: detectedResult.category,
       suggestedUnit: normalizeProductUnit(detectedResult.unit)
     });
@@ -407,7 +408,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                         <div>
                           <label className="text-[10px] font-semibold text-neutral-400">Marca</label>
                           <p className="text-xs font-bold text-neutral-800 truncate">
-                            {detectedResult.brand || 'Não informada'}
+                            {formatBrandDisplay(detectedResult.brand) || 'Não informada (opcional)'}
                           </p>
                         </div>
                         <div>

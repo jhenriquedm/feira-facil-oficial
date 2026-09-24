@@ -7,6 +7,7 @@ import {
 import { Category, Product } from '../types';
 import { sanitizeAndCapitalize } from '../utils/textFormatters';
 import { PRODUCT_UNITS, normalizeProductUnit } from '../utils/units';
+import { normalizeBrand } from '../utils/brand';
 
 export interface OcrExtractedItem {
   id: string;
@@ -203,7 +204,7 @@ export function ReceiptOcrModal({
         unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0,
         totalPrice: Number(it.totalPrice) >= 0 ? Number(it.totalPrice) : (Number(it.quantity) * Number(it.unitPrice)),
         category: it.category || 'Mercearia',
-        brand: it.brand || '',
+        brand: normalizeBrand(it.brand),
         barcode: it.barcode || '',
         selected: true
       }));
@@ -619,7 +620,7 @@ export function ReceiptOcrModal({
                           type="text"
                           maxLength={30}
                           value={item.brand}
-                          onChange={(e) => handleUpdateItem(item.id, 'brand', sanitizeAndCapitalize(e.target.value, 30))}
+                          onChange={(e) => handleUpdateItem(item.id, 'brand', normalizeBrand(sanitizeAndCapitalize(e.target.value, 30)))}
                           placeholder="Marca (opcional)"
                           className="w-1/2 px-2 py-0.5 text-base sm:text-[11px] bg-white text-neutral-500 border border-dashed border-neutral-200 rounded-md focus:outline-none"
                         />

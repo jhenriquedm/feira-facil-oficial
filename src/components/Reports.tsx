@@ -5,6 +5,7 @@ import {
   ShoppingBag, ArrowUpDown, ChevronDown, ChevronUp, Layers, Tag, Search, ArrowRight
 } from 'lucide-react';
 import { Purchase, PurchaseItem, Category, Product, PURCHASE_TYPE_LABELS } from '../types';
+import { formatBrandDisplay } from '../utils/brand';
 
 interface ReportsProps {
   purchases: Purchase[];
@@ -604,7 +605,7 @@ export function Reports({ purchases, purchaseItems, products, categories }: Repo
                               </span>
                               <div className="flex items-center gap-2 text-[10px] text-neutral-400">
                                 <span>{prod.quantity} {prod.unit} acumulados</span>
-                                {prod.brand && <span>• Marca: {prod.brand}</span>}
+                                {formatBrandDisplay(prod.brand) ? <span>• Marca: {formatBrandDisplay(prod.brand)}</span> : null}
                               </div>
                             </div>
                           </div>
@@ -655,7 +656,7 @@ export function Reports({ purchases, purchaseItems, products, categories }: Repo
                         .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }))
                         .map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.name} ({p.unit}) {p.brand ? `- ${p.brand}` : ''}
+                            {p.name} ({p.unit}) {formatBrandDisplay(p.brand) ? `- ${formatBrandDisplay(p.brand)}` : ''}
                           </option>
                         ))}
                     </select>

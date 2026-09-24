@@ -83,6 +83,8 @@ export interface UserProfile {
   bio?: string;
   color?: string;
   passwordHash?: string;
+  productsSeeded?: boolean;
+  categoriesSeeded?: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -8,6 +8,7 @@ import { CategoryIcon, AVAILABLE_ICONS } from './CategoryIcon';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { sanitizeAndCapitalize, formatMoneyInput, parseMoneyToNumber, formatCurrencyBRL } from '../utils/textFormatters';
 import { PRODUCT_UNITS, normalizeProductUnit, getUnitCardDisplay } from '../utils/units';
+import { normalizeBrand, formatBrandDisplay } from '../utils/brand';
 
 interface ProductsProps {
   categories: Category[];
@@ -137,10 +138,10 @@ export function Products({
   const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanedName = sanitizeAndCapitalize(prodName, 40);
-    const cleanedBrand = sanitizeAndCapitalize(prodBrand, 30);
+    const cleanedBrand = normalizeBrand(sanitizeAndCapitalize(prodBrand, 30));
 
-    if (!cleanedName || !prodCategoryId || !prodUnit || !cleanedBrand) {
-      showProductErrorTimed('Preencha os campos obrigatórios (incluindo marca recomendada).');
+    if (!cleanedName || !prodCategoryId || !prodUnit) {
+      showProductErrorTimed('Preencha os campos obrigatórios (Nome, Categoria e Unidade).');
       return;
     }
 
@@ -213,7 +214,7 @@ export function Products({
     setProdName(prod.name);
     setProdCategoryId(prod.categoryId);
     setProdUnit(normalizeProductUnit(prod.unit));
-    setProdBrand(prod.brand || '');
+    setProdBrand(normalizeBrand(prod.brand));
     setProdBarcode(prod.barcode || '');
     setProdLastPrice(formatMoneyInput(prod.lastPrice || 0));
     setShowProductForm(true);
@@ -338,7 +339,7 @@ export function Products({
       .filter(prod => {
         const q = productSearch.toLowerCase().trim();
         const matchesSearch = prod.name.toLowerCase().includes(q) || 
-                              (prod.brand && prod.brand.toLowerCase().includes(q)) ||
+                              (formatBrandDisplay(prod.brand).toLowerCase().includes(q)) ||
                               (prod.barcode && prod.barcode.includes(q.replace(/\D/g, '')));
         const matchesCategory = selectedCategoryFilter === 'all' || prod.categoryId === selectedCategoryFilter;
         return matchesSearch && matchesCategory;
@@ -604,174 +605,186 @@ export function Products({
             </div>
           </div>
 
-          {/* Product form overlay / inline */}
+          {/* Product form modal dialog (creation and edition) */}
           {showProductForm && (
-            <form onSubmit={handleProductSubmit} className="bg-white p-6 rounded-2xl border border-sky-100 shadow-md space-y-4">
-              <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
-                <h3 className="font-extrabold text-base text-neutral-950 flex items-center gap-2">
-                  <ShoppingBasket size={18} className="text-sky-500" />
-                  {editingProductId ? 'Editar Produto' : 'Cadastrar Novo Produto'}
-                </h3>
-                <button type="button" onClick={resetProductForm} className="p-1.5 hover:bg-neutral-100 rounded-lg text-neutral-500">
-                  <X size={16} />
-                </button>
-              </div>
-
-              {/* Form Validation Errors & Success */}
-              {productError && (
-                <div className="p-3.5 bg-red-50 border border-red-100 rounded-xl text-xs font-bold text-red-700 flex items-center gap-2">
-                  <AlertCircle size={16} className="shrink-0" />
-                  <span>{productError}</span>
-                </div>
-              )}
-
-              {productSuccess && (
-                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-800 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Check size={16} className="shrink-0 text-emerald-600" />
-                    <span>{productSuccess}</span>
-                  </div>
-                  <button type="button" onClick={() => setProductSuccess(null)} className="text-emerald-600 hover:text-emerald-800">
-                    <X size={14} />
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto overscroll-contain animate-in fade-in">
+              <form 
+                onSubmit={handleProductSubmit} 
+                className="bg-white max-w-2xl w-full rounded-3xl p-5 sm:p-6 border border-neutral-200 shadow-2xl space-y-4 my-auto max-h-[90dvh] overflow-y-auto pb-16 sm:pb-6"
+              >
+                <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+                  <h3 className="font-extrabold text-base text-neutral-950 flex items-center gap-2">
+                    <ShoppingBasket size={18} className="text-sky-500" />
+                    {editingProductId ? 'Editar Produto' : 'Cadastrar Novo Produto'}
+                  </h3>
+                  <button 
+                    type="button" 
+                    onClick={resetProductForm} 
+                    className="p-1.5 hover:bg-neutral-100 rounded-lg text-neutral-500 transition-colors"
+                    title="Fechar modal"
+                  >
+                    <X size={16} />
                   </button>
                 </div>
-              )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {/* Name */}
-                <div>
-                  <label className="block text-xs font-bold text-neutral-500 mb-1">Nome do Produto *</label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={40}
-                    placeholder="Ex: Arroz Integral"
-                    value={prodName}
-                    onChange={(e) => setProdName(sanitizeAndCapitalize(e.target.value, 40))}
-                    className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  />
-                </div>
+                {/* Form Validation Errors & Success */}
+                {productError && (
+                  <div className="p-3.5 bg-red-50 border border-red-100 rounded-xl text-xs font-bold text-red-700 flex items-center gap-2">
+                    <AlertCircle size={16} className="shrink-0" />
+                    <span>{productError}</span>
+                  </div>
+                )}
 
-                {/* Category with Quick Shortcut */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-bold text-neutral-500">Categoria *</label>
-                    <button
-                      type="button"
-                      onClick={() => setShowQuickCategoryModal(true)}
-                      className="text-[11px] font-bold text-sky-600 hover:underline flex items-center gap-1"
-                    >
-                      <FolderPlus size={12} />
-                      <span>+ Nova Categoria</span>
+                {productSuccess && (
+                  <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-800 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Check size={16} className="shrink-0 text-emerald-600" />
+                      <span>{productSuccess}</span>
+                    </div>
+                    <button type="button" onClick={() => setProductSuccess(null)} className="text-emerald-600 hover:text-emerald-800">
+                      <X size={14} />
                     </button>
                   </div>
-                  <select
-                    value={prodCategoryId}
-                    onChange={(e) => setProdCategoryId(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 overflow-y-auto max-h-48 cursor-pointer"
-                  >
-                    {sortedCategories.length === 0 && <option value="">Crie uma categoria primeiro</option>}
-                    {sortedCategories.map((cat) => (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                )}
 
-                {/* Unit */}
-                <div>
-                  <label className="block text-xs font-bold text-neutral-500 mb-1">Unidade de medida *</label>
-                  <select
-                    value={normalizeProductUnit(prodUnit)}
-                    onChange={(e) => setProdUnit(e.target.value)}
-                    className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 overflow-y-auto max-h-48 cursor-pointer"
-                  >
-                    {PRODUCT_UNITS.map((u) => (
-                      <option key={u.value} value={u.value}>
-                        {u.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Name */}
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 mb-1">Nome do Produto *</label>
+                    <input
+                      type="text"
+                      required
+                      autoFocus
+                      maxLength={40}
+                      placeholder="Ex: Arroz Integral"
+                      value={prodName}
+                      onChange={(e) => setProdName(sanitizeAndCapitalize(e.target.value, 40))}
+                      className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
 
-                {/* Brand */}
-                <div>
-                  <label className="block text-xs font-bold text-neutral-500 mb-1">Marca recomendada *</label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={30}
-                    placeholder="Ex: Tio João"
-                    value={prodBrand}
-                    onChange={(e) => setProdBrand(sanitizeAndCapitalize(e.target.value, 30))}
-                    className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  />
-                </div>
+                  {/* Category with Quick Shortcut */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-bold text-neutral-500">Categoria *</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickCategoryModal(true)}
+                        className="text-[11px] font-bold text-sky-600 hover:underline flex items-center gap-1"
+                      >
+                        <FolderPlus size={12} />
+                        <span>+ Nova Categoria</span>
+                      </button>
+                    </div>
+                    <select
+                      value={prodCategoryId}
+                      onChange={(e) => setProdCategoryId(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 overflow-y-auto max-h-48 cursor-pointer"
+                    >
+                      {sortedCategories.length === 0 && <option value="">Crie uma categoria primeiro</option>}
+                      {sortedCategories.map((cat) => (
+                        <option key={cat.id} value={cat.id}>
+                          {cat.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                {/* Barcode with inline scanner button */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-bold text-neutral-500">
-                      Código de Barras (EAN / GTIN)
+                  {/* Unit */}
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 mb-1">Unidade de medida *</label>
+                    <select
+                      value={normalizeProductUnit(prodUnit)}
+                      onChange={(e) => setProdUnit(e.target.value)}
+                      className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 overflow-y-auto max-h-48 cursor-pointer"
+                    >
+                      {PRODUCT_UNITS.map((u) => (
+                        <option key={u.value} value={u.value}>
+                          {u.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Brand */}
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 mb-1">
+                      Marca recomendada <span className="font-normal text-neutral-400">(opcional)</span>
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => setIsScannerOpen(true)}
-                      className="text-[11px] font-bold text-emerald-600 hover:underline flex items-center gap-1"
-                    >
-                      <BarcodeIcon size={12} />
-                      Ler com Câmera
-                    </button>
-                  </div>
-                  <div className="relative">
                     <input
                       type="text"
-                      maxLength={20}
-                      placeholder="Ex: 7891000100103"
-                      value={prodBarcode}
-                      onChange={(e) => setProdBarcode(e.target.value.replace(/\D/g, ''))}
-                      className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500"
+                      maxLength={30}
+                      placeholder="Ex: Tio João (opcional)"
+                      value={prodBrand}
+                      onChange={(e) => setProdBrand(sanitizeAndCapitalize(e.target.value, 30))}
+                      className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                     />
-                    <BarcodeIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" size={15} />
+                  </div>
+
+                  {/* Barcode with inline scanner button */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-bold text-neutral-500">
+                        Código de Barras (EAN / GTIN)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setIsScannerOpen(true)}
+                        className="text-[11px] font-bold text-emerald-600 hover:underline flex items-center gap-1"
+                      >
+                        <BarcodeIcon size={12} />
+                        Ler com Câmera
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        maxLength={20}
+                        placeholder="Ex: 7891000100103"
+                        value={prodBarcode}
+                        onChange={(e) => setProdBarcode(e.target.value.replace(/\D/g, ''))}
+                        className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500"
+                      />
+                      <BarcodeIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" size={15} />
+                    </div>
+                  </div>
+
+                  {/* Last Price */}
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 mb-1">Preço Atual / Último Preço (R$)</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-neutral-400">R$</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0,00"
+                        maxLength={14}
+                        value={prodLastPrice}
+                        onChange={(e) => setProdLastPrice(formatMoneyInput(e.target.value))}
+                        className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-sky-500"
+                      />
+                    </div>
                   </div>
                 </div>
 
-                {/* Last Price */}
-                <div>
-                  <label className="block text-xs font-bold text-neutral-500 mb-1">Preço Atual / Último Preço (R$)</label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-neutral-400">R$</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="0,00"
-                      maxLength={14}
-                      value={prodLastPrice}
-                      onChange={(e) => setProdLastPrice(formatMoneyInput(e.target.value))}
-                      className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-sky-500"
-                    />
-                  </div>
+                <div className="flex justify-end gap-3 pt-3 border-t border-neutral-100">
+                  <button
+                    type="button"
+                    onClick={resetProductForm}
+                    className="px-4 py-2 border border-neutral-200 text-neutral-700 rounded-xl text-xs font-bold hover:bg-neutral-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+                  >
+                    {editingProductId ? 'Salvar Alterações' : 'Adicionar Produto'}
+                  </button>
                 </div>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={resetProductForm}
-                  className="px-4 py-2 border border-neutral-200 text-neutral-700 rounded-xl text-xs font-bold hover:bg-neutral-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-xs font-bold"
-                >
-                  {editingProductId ? 'Salvar Alterações' : 'Adicionar Produto'}
-                </button>
-              </div>
-            </form>
+              </form>
+            </div>
           )}
 
           {/* Standalone Error Feedback (e.g. Deletion Error) */}
@@ -806,9 +819,9 @@ export function Products({
 
                       <h4 className="font-extrabold text-neutral-950 truncate">{prod.name}</h4>
                       
-                      {prod.brand && (
-                        <p className="text-xs text-neutral-400 truncate">Marca: <strong className="text-neutral-600">{prod.brand}</strong></p>
-                      )}
+                      {formatBrandDisplay(prod.brand) ? (
+                        <p className="text-xs text-neutral-400 truncate">Marca: <strong className="text-neutral-600">{formatBrandDisplay(prod.brand)}</strong></p>
+                      ) : null}
 
                       <p className="text-sm font-black text-emerald-600 mt-1">
                         {prod.lastPrice > 0 
@@ -828,9 +841,10 @@ export function Products({
                         <TrendingUp size={15} />
                       </button>
                       <button 
+                        type="button"
                         onClick={() => startEditProduct(prod)}
-                        className="p-1.5 hover:bg-sky-50 text-sky-600 rounded-lg"
-                        title="Editar"
+                        className="p-1.5 hover:bg-sky-50 text-sky-600 rounded-lg transition-colors"
+                        title="Editar Produto"
                       >
                         <Edit3 size={15} />
                       </button>
@@ -1149,7 +1163,7 @@ export function Products({
                     Histórico de Preços
                   </h3>
                   <p className="text-xs text-neutral-500 font-semibold">
-                    {selectedProductForHistory.name} {selectedProductForHistory.brand && `(${selectedProductForHistory.brand})`} • {selectedProductForHistory.unit}
+                    {selectedProductForHistory.name} {formatBrandDisplay(selectedProductForHistory.brand) ? `(${formatBrandDisplay(selectedProductForHistory.brand)})` : ''} • {selectedProductForHistory.unit}
                   </p>
                 </div>
               </div>

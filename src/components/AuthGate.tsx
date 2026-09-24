@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Lock, Mail, User, Check, AlertCircle, RefreshCw, Key, 
   Eye, EyeOff, ShieldCheck, ArrowLeft, ArrowRight, CheckCircle2, 
-  CreditCard, Search, Trash2
+  CreditCard, Search
 } from 'lucide-react';
 import { AppLogo } from './AppLogo';
 import { sanitizeAndCapitalize, formatCPF, isValidCPF } from '../utils/textFormatters';
@@ -217,6 +217,29 @@ export function AuthGate({
     }
   };
 
+  const handleGoogleLogin = async () => {
+    if (loading) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    setLoading(true);
+    try {
+      await loginWithGoogle();
+    } catch (err: any) {
+      const code = err?.code || err?.message || '';
+      if (
+        code.includes('auth/popup-closed-by-user') ||
+        code.includes('auth/cancelled-popup-request') ||
+        code.includes('popup-closed-by-user') ||
+        code.includes('cancelled-popup-request')
+      ) {
+        return;
+      }
+      showTimedNotification(err?.message || 'Erro ao autenticar com o Google.', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleClearLocalStorage = () => {
     if (clearLocalStorage) {
       clearLocalStorage();
@@ -347,7 +370,7 @@ export function AuthGate({
             {/* Google Login */}
             <button
               type="button"
-              onClick={loginWithGoogle}
+              onClick={handleGoogleLogin}
               disabled={loading || !isOnline}
               className="w-full py-2.5 bg-white hover:bg-neutral-50 disabled:opacity-50 text-neutral-700 border border-neutral-200 rounded-2xl text-xs font-bold shadow-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2"
             >
@@ -664,19 +687,6 @@ export function AuthGate({
             )}
           </div>
         )}
-      </div>
-
-      {/* Reset / Clear Local Storage Button */}
-      <div className="mt-4 flex justify-center">
-        <button
-          type="button"
-          onClick={handleClearLocalStorage}
-          title="Limpar armazenamento local e dados salvos no navegador"
-          className="text-xs font-bold text-neutral-400 hover:text-red-600 transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-white/80 active:scale-95 shadow-2xs"
-        >
-          <Trash2 size={14} />
-          Limpar Armazenamento Local
-        </button>
       </div>
     </div>
   );

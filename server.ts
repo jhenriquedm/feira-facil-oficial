@@ -155,7 +155,15 @@ Diretrizes de Extração:
         throw new Error('O modelo não conseguiu extrair dados do cupom fiscal.');
       }
 
-      res.json(JSON.parse(text));
+      const parsed = JSON.parse(text);
+      if (parsed && Array.isArray(parsed.items)) {
+        parsed.items = parsed.items.map((it: any) => ({
+          ...it,
+          brand: (it.brand && String(it.brand).toLowerCase() !== 'null' && String(it.brand).toLowerCase() !== 'undefined') ? String(it.brand).trim() : ''
+        }));
+      }
+
+      res.json(parsed);
     } catch (error: any) {
       console.error('Erro no OCR de cupom fiscal:', error);
       res.status(500).json({ error: error.message || 'Erro ao processar imagem do cupom fiscal com IA.' });
@@ -476,7 +484,7 @@ Diretrizes de Extração:
         notFoundInOpenFoodFacts: !found,
         barcode: code,
         name: productName,
-        brand: productBrand,
+        brand: (productBrand && productBrand.toLowerCase() !== 'null' && productBrand.toLowerCase() !== 'undefined') ? productBrand.trim() : '',
         categorySuggestion: categorySuggestion || 'Mercearia',
         unit: unit || 'Unidade'
       });

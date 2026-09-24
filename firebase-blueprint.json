@@ -32,7 +32,7 @@
         "updatedAt": { "type": "string" },
         "userId": { "type": "string" }
       },
-      "required": ["id", "name", "categoryId", "unit", "brand", "lastPrice", "isActive", "createdAt", "updatedAt", "userId"]
+      "required": ["id", "name", "categoryId", "unit", "lastPrice", "isActive", "createdAt", "updatedAt", "userId"]
     },
     "Purchase": {
       "title": "Purchase",
