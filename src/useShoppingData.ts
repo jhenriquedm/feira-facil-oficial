@@ -131,6 +131,37 @@ export function useShoppingData() {
     return saved ? JSON.parse(saved) : defaultValue;
   };
 
+  // Helper to store active user session across all offline session keys
+  const persistSessionLocally = (session: {
+    uid: string;
+    email?: string | null;
+    displayName?: string | null;
+    photoURL?: string | null;
+    isOffline?: boolean;
+    canUseOffline?: boolean;
+  }) => {
+    if (!session || !session.uid) return;
+    const sessionObj = {
+      uid: session.uid,
+      email: session.email || '',
+      displayName: session.displayName || session.email?.split('@')[0] || 'Usuário',
+      photoURL: session.photoURL || undefined,
+      isOffline: session.isOffline ?? false,
+      canUseOffline: true,
+      lastActiveAt: new Date().toISOString()
+    };
+    const jsonStr = JSON.stringify(sessionObj);
+    localStorage.setItem('feira_active_offline_session', jsonStr);
+    localStorage.setItem('feira_offline_session', jsonStr);
+    localStorage.setItem('feira_last_logged_user', jsonStr);
+  };
+
+  const clearSessionLocally = () => {
+    localStorage.removeItem('feira_active_offline_session');
+    localStorage.removeItem('feira_offline_session');
+    localStorage.removeItem('feira_last_logged_user');
+  };
+
   // Helper to batch-write products to Firestore without exceeding operation limits
   const seedProductsInFirestore = async (uid: string, prods: Product[]) => {
     const CHUNK_SIZE = 250;
@@ -152,45 +183,56 @@ export function useShoppingData() {
 
   // Auth monitoring & data loading
   useEffect(() => {
-    // Helper to load offline session data
-    const loadSessionOffline = () => {
-      const activeSession = localStorage.getItem('feira_active_offline_session');
-      if (activeSession) {
-        try {
-          const parsed = JSON.parse(activeSession);
-          setUser(parsed);
-          
-          // Load offline data for this user
-          let localCats = loadUserData<Category[]>('categories', [], parsed.uid);
-          if (!localCats || localCats.length === 0) {
-            localCats = DEFAULT_CATEGORIES(parsed.uid);
-            saveUserData('categories', localCats, parsed.uid);
-          }
-          let localProds = loadUserData<Product[]>('products', [], parsed.uid);
-          const isProdsInit = localStorage.getItem(`feira_products_initialized_${parsed.uid}`);
-          if (!isProdsInit && (!localProds || localProds.length === 0)) {
-            localProds = DEFAULT_PRODUCTS(parsed.uid);
-            saveUserData('products', localProds, parsed.uid);
-            localStorage.setItem(`feira_products_initialized_${parsed.uid}`, 'true');
-          }
-          const localPurchases = loadUserData<Purchase[]>('purchases', [], parsed.uid);
-          const localItems = loadUserData<Record<string, PurchaseItem[]>>('purchase_items', {}, parsed.uid);
-          const localProfile = loadUserData('user_profile', {
-            id: parsed.uid,
-            name: parsed.displayName || 'Usuário',
-            email: parsed.email || '',
-            photoURL: parsed.photoURL,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          }, parsed.uid);
+    let isMounted = true;
 
-          setCategories(localCats);
-          setProducts(localProds);
-          setPurchases(localPurchases);
-          setPurchaseItems(localItems);
-          setUserProfile(localProfile);
-          setLoading(false);
-          return true;
+    // Helper to load offline session data from any of the local session keys
+    const loadSessionOffline = () => {
+      const rawSession = 
+        localStorage.getItem('feira_active_offline_session') ||
+        localStorage.getItem('feira_offline_session') ||
+        localStorage.getItem('feira_last_logged_user');
+
+      if (rawSession) {
+        try {
+          const parsed = JSON.parse(rawSession);
+          if (parsed && parsed.uid) {
+            setUser(parsed);
+            
+            // Sync all keys so they stay up to date
+            persistSessionLocally(parsed);
+
+            // Load offline data for this user
+            let localCats = loadUserData<Category[]>('categories', [], parsed.uid);
+            if (!localCats || localCats.length === 0) {
+              localCats = DEFAULT_CATEGORIES(parsed.uid);
+              saveUserData('categories', localCats, parsed.uid);
+            }
+            let localProds = loadUserData<Product[]>('products', [], parsed.uid);
+            const isProdsInit = localStorage.getItem(`feira_products_initialized_${parsed.uid}`);
+            if (!isProdsInit && (!localProds || localProds.length === 0)) {
+              localProds = DEFAULT_PRODUCTS(parsed.uid);
+              saveUserData('products', localProds, parsed.uid);
+              localStorage.setItem(`feira_products_initialized_${parsed.uid}`, 'true');
+            }
+            const localPurchases = loadUserData<Purchase[]>('purchases', [], parsed.uid);
+            const localItems = loadUserData<Record<string, PurchaseItem[]>>('purchase_items', {}, parsed.uid);
+            const localProfile = loadUserData<UserProfile>('user_profile', {
+              id: parsed.uid,
+              name: parsed.displayName || parsed.name || 'Usuário',
+              email: parsed.email || '',
+              photoURL: parsed.photoURL,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }, parsed.uid);
+
+            setCategories(localCats);
+            setProducts(localProds);
+            setPurchases(localPurchases);
+            setPurchaseItems(localItems);
+            setUserProfile(localProfile);
+            setLoading(false);
+            return true;
+          }
         } catch (err) {
           console.warn("Failed to parse local offline session:", err);
         }
@@ -198,63 +240,27 @@ export function useShoppingData() {
       return false;
     };
 
-    // If offline, load offline session immediately and do not listen to Firebase Auth
-    if (!isOnline) {
-      const loaded = loadSessionOffline();
-      if (!loaded) {
-        setUser(null);
-        setUserProfile(null);
-        let defaultCats = loadUserData<Category[]>('categories', [], 'guest');
-        if (!defaultCats || defaultCats.length === 0) {
-          defaultCats = DEFAULT_CATEGORIES('guest');
-          saveUserData('categories', defaultCats, 'guest');
-        }
-        let defaultProds = loadUserData<Product[]>('products', [], 'guest');
-        const initialized = localStorage.getItem('feira_products_initialized_guest');
-        if (!initialized && (!defaultProds || defaultProds.length === 0)) {
-          defaultProds = DEFAULT_PRODUCTS('guest');
-          saveUserData('products', defaultProds, 'guest');
-          localStorage.setItem('feira_products_initialized_guest', 'true');
-        }
-        setCategories(defaultCats);
-        setProducts(defaultProds);
-        setPurchases([]);
-        setPurchaseItems({});
-        setLoading(false);
-      }
-      return;
-    }
+    // Pre-restore session locally immediately on mount to prevent AuthGate flash
+    loadSessionOffline();
 
-    // If online, subscribe to Firebase Auth state changes
+    // Subscribe to Firebase Auth state changes (works both online and offline via Firebase Auth cache)
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!isMounted) return;
       cleanupActiveListeners();
       
       if (firebaseUser) {
-        // Clear active custom offline session if it doesn't match the firebaseUser UID to prevent mixups
-        const activeSession = localStorage.getItem('feira_active_offline_session');
-        if (activeSession) {
-          try {
-            const parsed = JSON.parse(activeSession);
-            if (parsed.uid !== firebaseUser.uid) {
-              localStorage.removeItem('feira_active_offline_session');
-            }
-          } catch (_) {
-            localStorage.removeItem('feira_active_offline_session');
-          }
-        }
-
         setUser(firebaseUser);
         setLoading(true);
         const uid = firebaseUser.uid;
 
         // Save session locally to enable offline mode
-        localStorage.setItem('feira_offline_session', JSON.stringify({
-          email: firebaseUser.email,
+        persistSessionLocally({
           uid: firebaseUser.uid,
+          email: firebaseUser.email,
           displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário',
           photoURL: firebaseUser.photoURL || undefined,
           canUseOffline: true
-        }));
+        });
 
         // 0. Listen for User Profile Document in Firestore /users/{uid}
         const userDocRef = doc(db, 'users', uid);
@@ -871,12 +877,12 @@ export function useShoppingData() {
         localStorage.setItem(`feira_products_initialized_${finalUid}`, 'true');
         saveUserData('user_profile', finalProfile, finalUid);
 
-        localStorage.setItem('feira_offline_session', JSON.stringify({
-          email: cleanedEmail,
+        persistSessionLocally({
           uid: finalUid,
+          email: cleanedEmail,
           displayName: cleanedName,
           canUseOffline: true
-        }));
+        });
 
         // Update active user state
         setUser(activeFirebaseUser);
@@ -932,13 +938,12 @@ export function useShoppingData() {
       setCategories(defaultCats);
       setProducts(defaultProds);
       setThemeColor('#0284c7');
-      localStorage.setItem('feira_active_offline_session', JSON.stringify(activeOfflineUser));
-      localStorage.setItem('feira_offline_session', JSON.stringify({
-        email: cleanedEmail,
+      persistSessionLocally({
         uid,
+        email: cleanedEmail,
         displayName: cleanedName,
-        canUseOffline: true
-      }));
+        isOffline: true
+      });
     }
   };
 
@@ -987,12 +992,11 @@ export function useShoppingData() {
         const userCredential = await signInWithEmailAndPassword(auth, cleanedEmail, password);
         const firebaseUser = userCredential.user;
         
-        localStorage.setItem('feira_offline_session', JSON.stringify({
-          email: firebaseUser.email,
+        persistSessionLocally({
           uid: firebaseUser.uid,
-          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário',
-          canUseOffline: true
-        }));
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário'
+        });
         return;
       } catch (authErr: any) {
         // Continue to check if matchedUser was found
@@ -1022,14 +1026,13 @@ export function useShoppingData() {
       }
 
       saveUserData('user_profile', matchedUser, matchedUser.id);
-      localStorage.setItem('feira_active_offline_session', JSON.stringify(offlineUser));
-      localStorage.setItem('feira_offline_session', JSON.stringify({
-        email: matchedUser.email,
+      persistSessionLocally({
         uid: matchedUser.id,
+        email: matchedUser.email,
         displayName: matchedUser.name,
         photoURL: matchedUser.photoURL,
-        canUseOffline: true
-      }));
+        isOffline: !isOnline
+      });
 
       // Load user data and setup listeners
       if (isOnline) {
@@ -1319,14 +1322,13 @@ export function useShoppingData() {
           if (matchedProfile.color) setThemeColor(matchedProfile.color);
 
           saveUserData('user_profile', matchedProfile, matchedProfile.id);
-          localStorage.setItem('feira_active_offline_session', JSON.stringify(activeUser));
-          localStorage.setItem('feira_offline_session', JSON.stringify({
-            email: matchedProfile.email,
+          persistSessionLocally({
             uid: matchedProfile.id,
+            email: matchedProfile.email,
             displayName: matchedProfile.name,
             photoURL: matchedProfile.photoURL,
-            canUseOffline: true
-          }));
+            isOffline: !isOnline
+          });
 
           setupUserDataListeners(matchedProfile.id, matchedProfile.name, matchedProfile.email);
           return;
@@ -1339,13 +1341,13 @@ export function useShoppingData() {
         throw new Error("Não foi possível concluir a autenticação com o Google.");
       }
 
-      // Enable offline mode
-      localStorage.setItem('feira_offline_session', JSON.stringify({
-        email: firebaseUser.email,
+      // Enable offline mode across all local keys
+      persistSessionLocally({
         uid: firebaseUser.uid,
+        email: firebaseUser.email,
         displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário',
-        canUseOffline: true
-      }));
+        photoURL: firebaseUser.photoURL || undefined
+      });
 
       // Ensure user document and default categories exist in Firestore immediately
       try {
@@ -1434,8 +1436,7 @@ export function useShoppingData() {
     setIsSyncing(true);
     try {
       cleanupActiveListeners();
-      localStorage.removeItem('feira_offline_session');
-      localStorage.removeItem('feira_active_offline_session');
+      clearSessionLocally();
 
       if (user && !('isOffline' in user)) {
         await signOut(auth);
