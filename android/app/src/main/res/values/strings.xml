@@ -4,4 +4,5 @@
     <string name="title_activity_main">Feira Fácil</string>
     <string name="package_name">com.feirafacil.app</string>
     <string name="custom_url_scheme">com.feirafacil.app</string>
+    <string name="server_client_id">901690992750-jbuc5p2bebr2940uaorqtn5qcp72q6cp.apps.googleusercontent.com</string>
 </resources>

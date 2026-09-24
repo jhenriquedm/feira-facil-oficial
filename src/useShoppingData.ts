@@ -1217,29 +1217,21 @@ export function useShoppingData() {
         try {
           googleUser = await GoogleAuth.signIn();
         } catch (nativeErr: any) {
-          console.warn("Native GoogleAuth.signIn warning/error, trying web popup fallback:", nativeErr);
-          const provider = new GoogleAuthProvider();
-          provider.setCustomParameters({ prompt: 'select_account' });
-          try {
-            const userCredential = await signInWithPopup(auth, provider);
-            firebaseUser = userCredential.user;
-          } catch (webFallbackErr: any) {
-            console.error("Web popup fallback error:", webFallbackErr);
-            if (
-              webFallbackErr.code === 'auth/account-exists-with-different-credential' ||
-              webFallbackErr.code === 'auth/credential-already-in-use' ||
-              webFallbackErr.code === 'auth/email-already-in-use' ||
-              webFallbackErr?.message?.includes('account-exists-with-different-credential')
-            ) {
-              googleEmail = webFallbackErr.customData?.email || webFallbackErr.email || googleEmail;
-              firebaseUser = null;
-            } else {
-              throw webFallbackErr;
-            }
+          console.warn("Native GoogleAuth.signIn error:", nativeErr);
+          const errStr = nativeErr?.message || nativeErr?.toString() || '';
+          if (
+            errStr.includes('12501') || 
+            errStr.toLowerCase().includes('cancel') || 
+            errStr.toLowerCase().includes('closed') ||
+            errStr.toLowerCase().includes('user_cancelled')
+          ) {
+            // User intentionally dismissed the Google Account chooser
+            return;
           }
+          throw nativeErr;
         }
 
-        if (!firebaseUser && googleUser) {
+        if (googleUser) {
           googleEmail = googleUser?.email || null;
           const idToken = googleUser?.authentication?.idToken || (googleUser as any)?.idToken;
           const accessToken = googleUser?.authentication?.accessToken || (googleUser as any)?.accessToken;
@@ -1250,7 +1242,7 @@ export function useShoppingData() {
           } else if (accessToken) {
             credential = GoogleAuthProvider.credential(null, accessToken);
           } else {
-            throw new Error('Não foi possível obter o Token de Autenticação do Google.');
+            throw new Error('Não foi possível obter o token de autenticação do Google.');
           }
 
           try {
