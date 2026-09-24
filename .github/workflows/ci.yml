@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main, master ]
 
+permissions:
+  contents: write
+
 jobs:
   validate-and-test:
     name: Lint, Test & Build
@@ -81,6 +84,10 @@ jobs:
           gradle = gradle.replace(/versionName\s+\"[^\"]+\"/, 'versionName \"' + appVersion + '\"');
           fs.writeFileSync('android/app/build.gradle', gradle);
 
+          if (process.env.GITHUB_ENV) {
+            fs.appendFileSync(process.env.GITHUB_ENV, `APP_VERSION=${appVersion}\nAPP_BUILD=${buildNumber}\n`);
+          }
+
           console.log('✓ Successfully synchronized build target to Version v' + appVersion + ' (Build ' + buildNumber + ')');
           "
 
@@ -114,3 +121,13 @@ jobs:
         with:
           name: Feira_Facil_APK
           path: android/app/build/outputs/apk/debug/Feira_Facil.apk
+
+      - name: Publish Direct APK to GitHub Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.APP_VERSION }}
+          name: Feira Fácil v${{ env.APP_VERSION }} (Build ${{ env.APP_BUILD }})
+          files: android/app/build/outputs/apk/debug/Feira_Facil.apk
+          token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
