@@ -1225,19 +1225,34 @@ export function useShoppingData() {
             firebaseUser = userCredential.user;
           } catch (webFallbackErr: any) {
             console.error("Web popup fallback error:", webFallbackErr);
-            throw webFallbackErr;
+            if (
+              webFallbackErr.code === 'auth/account-exists-with-different-credential' ||
+              webFallbackErr.code === 'auth/credential-already-in-use' ||
+              webFallbackErr.code === 'auth/email-already-in-use' ||
+              webFallbackErr?.message?.includes('account-exists-with-different-credential')
+            ) {
+              googleEmail = webFallbackErr.customData?.email || webFallbackErr.email || googleEmail;
+              firebaseUser = null;
+            } else {
+              throw webFallbackErr;
+            }
           }
         }
 
         if (!firebaseUser && googleUser) {
           googleEmail = googleUser?.email || null;
-          const idToken = googleUser?.authentication?.idToken || (googleUser as any)?.idToken || (googleUser as any)?.authentication?.accessToken;
+          const idToken = googleUser?.authentication?.idToken || (googleUser as any)?.idToken;
+          const accessToken = googleUser?.authentication?.accessToken || (googleUser as any)?.accessToken;
 
-          if (!idToken) {
+          let credential: any = null;
+          if (idToken) {
+            credential = GoogleAuthProvider.credential(idToken);
+          } else if (accessToken) {
+            credential = GoogleAuthProvider.credential(null, accessToken);
+          } else {
             throw new Error('Não foi possível obter o Token de Autenticação do Google.');
           }
 
-          const credential = GoogleAuthProvider.credential(idToken);
           try {
             const userCredential = await signInWithCredential(auth, credential);
             firebaseUser = userCredential.user;
