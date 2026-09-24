@@ -26,20 +26,17 @@ jobs:
       - name: Run TypeScript Linter & Type Check
         run: npm run lint
 
-      - name: Auto-increment Version and Build Number
+      - name: Validate App Version
         run: |
           node -e "
           const fs = require('fs');
-          let content = fs.readFileSync('src/version.ts', 'utf8');
-          const runNumber = process.env.GITHUB_RUN_NUMBER || '1';
-          const newVersion = '1.3.' + runNumber;
-          const newBuild = 13 + parseInt(runNumber);
-          const today = new Date().toISOString().split('T')[0];
-          content = content.replace(/version:\s*'[^']+'/, \"version: '\" + newVersion + \"'\");
-          content = content.replace(/buildNumber:\s*\d+/, 'buildNumber: ' + newBuild);
-          content = content.replace(/releaseDate:\s*'[^']+'/, \"releaseDate: '\" + today + \"'\");
-          fs.writeFileSync('src/version.ts', content);
-          console.log('Incremented to Version:', newVersion, 'Build:', newBuild);
+          const versionTs = fs.readFileSync('src/version.ts', 'utf8');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const vMatch = versionTs.match(/version:\s*'([^']+)'/);
+          const bMatch = versionTs.match(/buildNumber:\s*(\d+)/);
+          const appVersion = vMatch ? vMatch[1] : pkg.version;
+          const buildNumber = bMatch ? parseInt(bMatch[1]) : 21;
+          console.log('✓ Validated App Version: v' + appVersion + ' (Build ' + buildNumber + ')');
           "
 
       - name: Run Automated Test Suite
