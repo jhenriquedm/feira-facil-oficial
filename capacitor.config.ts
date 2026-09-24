@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.gestaofinanceira.app',
+  appId: 'com.feirafacil.app',
   appName: 'Feira Fácil',
   webDir: 'dist',
   server: {

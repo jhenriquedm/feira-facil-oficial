@@ -20,7 +20,7 @@ export const APP_VERSION_INFO: AppVersionInfo = {
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
-  packageId: 'com.gestaofinanceira.app',
+  packageId: 'com.feirafacil.app',
   changelog: [
     {
       version: '1.3.3',

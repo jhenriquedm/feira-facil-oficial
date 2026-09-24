@@ -5,7 +5,7 @@ describe('App Versioning and Metadata', () => {
   it('has semantic version format and build numbers', () => {
     expect(APP_VERSION_INFO.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(APP_VERSION_INFO.buildNumber).toBeGreaterThan(0);
-    expect(APP_VERSION_INFO.packageId).toBe('com.gestaofinanceira.app');
+    expect(APP_VERSION_INFO.packageId).toBe('com.feirafacil.app');
     expect(APP_VERSION_INFO.targetSdkVersion).toBe(34);
   });
 

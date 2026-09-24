@@ -90,6 +90,9 @@ jobs:
           java-version: '21'
           distribution: 'zulu'
 
+      - name: Generate Native Assets
+        run: node scripts/generate-assets.cjs
+
       - name: Build Web Application
         run: npm run build
 
