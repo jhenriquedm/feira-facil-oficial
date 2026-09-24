@@ -97,6 +97,11 @@ export function Profile({
   const [photoURL, setPhotoURL] = useState<string | null>(
     userProfile?.photoURL || ('photoURL' in user ? user.photoURL : null) || null
   );
+  const [avatarLoadError, setAvatarLoadError] = useState(false);
+
+  useEffect(() => {
+    setAvatarLoadError(false);
+  }, [photoURL]);
 
   // Security Form State
   const [currentPassword, setCurrentPassword] = useState('');
@@ -480,8 +485,14 @@ export function Profile({
                   className="h-24 w-24 rounded-3xl bg-neutral-100 border-2 overflow-hidden flex items-center justify-center shadow-md"
                   style={{ borderColor: color }}
                 >
-                  {photoURL ? (
-                    <img src={photoURL} alt="Foto de Perfil" className="h-full w-full object-cover" />
+                  {photoURL && !avatarLoadError ? (
+                    <img 
+                      src={photoURL} 
+                      alt="Foto de Perfil" 
+                      referrerPolicy="no-referrer"
+                      onError={() => setAvatarLoadError(true)}
+                      className="h-full w-full object-cover" 
+                    />
                   ) : (
                     <div className="flex flex-col items-center justify-center font-black text-3xl" style={{ color }}>
                       {name ? name.charAt(0).toUpperCase() : 'U'}

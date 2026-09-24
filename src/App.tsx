@@ -27,6 +27,16 @@ export default function App() {
     }
   });
   const [sideMenuOpen, setSideMenuOpen] = useState(false);
+  const [headerAvatarError, setHeaderAvatarError] = useState(false);
+  const [drawerAvatarError, setDrawerAvatarError] = useState(false);
+
+  const userAvatarUrl = data.userProfile?.photoURL || (data.user && 'photoURL' in data.user ? data.user.photoURL : undefined);
+  const userDisplayName = data.userProfile?.name || data.user?.displayName || 'Usuário';
+
+  useEffect(() => {
+    setHeaderAvatarError(false);
+    setDrawerAvatarError(false);
+  }, [userAvatarUrl]);
 
   const handleSelectPurchase = (id: string | null) => {
     setActivePurchaseId(id);
@@ -118,9 +128,6 @@ export default function App() {
     );
   }
 
-  const userAvatarUrl = data.userProfile?.photoURL || ('photoURL' in data.user ? data.user.photoURL : undefined);
-  const userDisplayName = data.userProfile?.name || data.user.displayName || 'Usuário';
-
   return (
     <div className="min-h-screen flex flex-col bg-white text-neutral-900 font-sans selection:bg-sky-500/20">
       {/* Top navbar */}
@@ -169,8 +176,14 @@ export default function App() {
               title="Ir para o Meu Perfil"
             >
               <div className="h-7 w-7 rounded-xl bg-sky-500 text-white flex items-center justify-center font-bold text-xs overflow-hidden shadow-xs">
-                {userAvatarUrl ? (
-                  <img src={userAvatarUrl} alt="Avatar" className="h-full w-full object-cover" />
+                {userAvatarUrl && !headerAvatarError ? (
+                  <img 
+                    src={userAvatarUrl} 
+                    alt="Avatar" 
+                    referrerPolicy="no-referrer"
+                    onError={() => setHeaderAvatarError(true)}
+                    className="h-full w-full object-cover" 
+                  />
                 ) : (
                   userDisplayName.charAt(0).toUpperCase()
                 )}
@@ -221,8 +234,14 @@ export default function App() {
               className="h-12 w-12 rounded-2xl bg-sky-500 text-white flex items-center justify-center font-black text-lg overflow-hidden border-2 shadow-xs"
               style={{ borderColor: data.themeColor }}
             >
-              {userAvatarUrl ? (
-                <img src={userAvatarUrl} alt="Foto de Perfil" className="h-full w-full object-cover" />
+              {userAvatarUrl && !drawerAvatarError ? (
+                <img 
+                  src={userAvatarUrl} 
+                  alt="Foto de Perfil" 
+                  referrerPolicy="no-referrer"
+                  onError={() => setDrawerAvatarError(true)}
+                  className="h-full w-full object-cover" 
+                />
               ) : (
                 userDisplayName.charAt(0).toUpperCase()
               )}

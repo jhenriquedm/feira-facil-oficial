@@ -14,14 +14,23 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.3.4',
-  buildNumber: 21,
+  version: '1.3.5',
+  buildNumber: 22,
   releaseDate: '2026-09-24',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.3.5',
+      date: '2026-09-24',
+      highlights: [
+        'Correção de exibição de foto de perfil (referrerPolicy="no-referrer" e fallback elegante para avatares do Google/externos)',
+        'Esclarecimento e alinhamento de persistência de sessão nativa e restauração de dados via Google Drive Auto-Backup',
+        'Versionamento contínuo sincronizado no app, APK e pipeline de CI (v1.3.5 • Build 22)'
+      ]
+    },
     {
       version: '1.3.4',
       date: '2026-09-24',
