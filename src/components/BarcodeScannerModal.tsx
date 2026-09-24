@@ -191,6 +191,12 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     setFocusRing({ x, y });
     setTimeout(() => setFocusRing(null), 1200);
 
+    // Resume video playback if Android WebView paused it
+    const video = document.querySelector(`#${readerElementId} video`) as HTMLVideoElement;
+    if (video && video.paused) {
+      video.play().catch(() => {});
+    }
+
     if (scannerRef.current) {
       try {
         await scannerRef.current.applyVideoConstraints({
@@ -235,8 +241,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       });
       scannerRef.current = html5QrCode;
 
-      // Full-viewfinder decoding! No artificial 280x160 cropping!
-      // This allows scanning anywhere across the entire camera view at any distance.
+      // Full-viewfinder decoding!
       const config = {
         fps: 20,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
@@ -249,22 +254,20 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         disableFlip: true
       };
 
-      // Camera constraints: Request HD resolution & continuous autofocus
-      // HD resolution allows barcode bars to be sharp even from 20-30cm away!
-      const cameraCandidates = [
+      // Camera constraints: Clean, standard-compliant constraints
+      const cameraCandidates: any[] = [
         {
-          facingMode: 'environment',
-          width: { min: 1280, ideal: 1920, max: 2560 },
-          height: { min: 720, ideal: 1080, max: 1440 },
-          focusMode: 'continuous'
-        },
-        {
-          facingMode: 'environment',
+          facingMode: { ideal: 'environment' },
           width: { ideal: 1280 },
-          height: { ideal: 720 },
-          focusMode: 'continuous'
+          height: { ideal: 720 }
         },
-        { facingMode: 'environment' }
+        {
+          facingMode: 'environment'
+        },
+        {
+          facingMode: { ideal: 'environment' }
+        },
+        {}
       ];
 
       let started = false;
@@ -285,9 +288,51 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         }
       }
 
+      // If generic constraints failed, probe physical camera IDs
+      if (!started) {
+        try {
+          const devices = await Html5Qrcode.getCameras();
+          if (devices && devices.length > 0) {
+            const backCam = devices.find((d) =>
+              d.label.toLowerCase().includes('back') ||
+              d.label.toLowerCase().includes('traseira') ||
+              d.label.toLowerCase().includes('rear') ||
+              d.label.toLowerCase().includes('environment')
+            ) || devices[devices.length - 1];
+
+            await html5QrCode.start(
+              backCam.id,
+              config,
+              (decodedText) => {
+                handleScanSuccess(decodedText);
+              },
+              undefined
+            );
+            started = true;
+          }
+        } catch (deviceErr) {
+          console.warn('Falha no fallback por ID de câmera:', deviceErr);
+        }
+      }
+
       if (!started) {
         setIsScanning(false);
         return;
+      }
+
+      // Ensure video element inside readerElementId has proper attributes and active playback
+      const videoEl = document.querySelector(`#${readerElementId} video`) as HTMLVideoElement;
+      if (videoEl) {
+        videoEl.muted = true;
+        videoEl.defaultMuted = true;
+        videoEl.setAttribute('playsinline', 'true');
+        videoEl.setAttribute('webkit-playsinline', 'true');
+        videoEl.style.width = '100%';
+        videoEl.style.height = '100%';
+        videoEl.style.objectFit = 'cover';
+        if (videoEl.paused) {
+          videoEl.play().catch(() => {});
+        }
       }
 
       // Check capabilities (Torch & Hardware Zoom)

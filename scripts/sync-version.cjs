@@ -12,7 +12,7 @@ const vMatch = versionTs.match(/version:\s*'([^']+)'/);
 const bMatch = versionTs.match(/buildNumber:\s*(\d+)/);
 
 const appVersion = vMatch ? vMatch[1] : pkg.version;
-const buildNumber = bMatch ? parseInt(bMatch[1], 10) : 51;
+const buildNumber = bMatch ? parseInt(bMatch[1], 10) : 52;
 
 let gradle = fs.readFileSync(gradlePath, 'utf8');
 gradle = gradle.replace(/versionCode\s+\d+/, 'versionCode ' + buildNumber);

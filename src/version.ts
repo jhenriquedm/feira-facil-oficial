@@ -14,14 +14,24 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.4.1',
-  buildNumber: 51,
+  version: '1.4.2',
+  buildNumber: 52,
   releaseDate: '2026-09-24',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.4.2',
+      date: '2026-09-24',
+      highlights: [
+        'Ativação de aceleração de hardware (hardwareAccelerated) no AndroidManifest para renderização de câmera no WebView',
+        'Desbloqueio de autoplay sem restrição de toque (setMediaPlaybackRequiresUserGesture: false) no WebView',
+        'Resolução de tela preta e ícone de play no Leitor OCR de Cupom e Leitor de Código de Barras',
+        'Fallback dinâmico de câmeras por ID físico (getCameras) e toque para retomar foco/vídeo'
+      ]
+    },
     {
       version: '1.4.1',
       date: '2026-09-24',

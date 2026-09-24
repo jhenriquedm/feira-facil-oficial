@@ -165,6 +165,11 @@ export function ReceiptOcrModal({
     setFocusRing({ x, y });
     setTimeout(() => setFocusRing(null), 1200);
 
+    // If video was paused or waiting for gesture in Android WebView, play it now
+    if (videoRef.current && videoRef.current.paused) {
+      videoRef.current.play().catch(() => {});
+    }
+
     if (streamRef.current) {
       const track = streamRef.current.getVideoTracks()[0];
       if (track) {
@@ -187,29 +192,48 @@ export function ReceiptOcrModal({
     try {
       stopCamera();
 
-      // High-resolution constraints for sharp receipt details at distance
+      // Flexible constraints with reliable progressive fallback
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: { ideal: 'environment' },
-          width: { min: 1280, ideal: 1920, max: 2560 },
-          height: { min: 720, ideal: 1080, max: 1440 },
-          focusMode: 'continuous'
-        } as any
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
       };
 
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
       } catch {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' }
-        });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment' }
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
       }
 
       streamRef.current = stream;
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        const v = videoRef.current;
+        v.muted = true;
+        v.defaultMuted = true;
+        v.playsInline = true;
+        v.setAttribute('playsinline', 'true');
+        v.setAttribute('webkit-playsinline', 'true');
+        v.srcObject = stream;
+        
+        v.onloadedmetadata = () => {
+          v.play().catch((playErr) => {
+            console.warn('Erro ao reproduzir vídeo no onloadedmetadata:', playErr);
+          });
+        };
+        try {
+          await v.play();
+        } catch (e) {
+          console.warn('Play imediato rejeitado:', e);
+        }
       }
       setIsCameraActive(true);
 
@@ -490,7 +514,15 @@ export function ReceiptOcrModal({
                   className="relative bg-black rounded-3xl overflow-hidden aspect-[4/3] sm:aspect-[16/9] flex items-center justify-center shadow-inner cursor-pointer select-none"
                 >
                   <video
-                    ref={videoRef}
+                    ref={(el) => {
+                      if (el) {
+                        videoRef.current = el;
+                        el.muted = true;
+                        el.defaultMuted = true;
+                        el.setAttribute('playsinline', 'true');
+                        el.setAttribute('webkit-playsinline', 'true');
+                      }
+                    }}
                     autoPlay
                     playsInline
                     muted
