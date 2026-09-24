@@ -96,6 +96,9 @@ jobs:
       - name: Build Web Application
         run: npm run build
 
+      - name: Ensure Reproducible Debug Keystore
+        run: node scripts/generate-debug-keystore.cjs
+
       - name: Sync Capacitor Android
         run: npx cap sync android
 
