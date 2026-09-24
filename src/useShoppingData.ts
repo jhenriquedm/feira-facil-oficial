@@ -1213,29 +1213,46 @@ export function useShoppingData() {
           await GoogleAuth.signOut();
         } catch (err) {}
 
-        const googleUser = await GoogleAuth.signIn();
-        googleEmail = googleUser?.email || null;
-        const idToken = googleUser?.authentication?.idToken || (googleUser as any)?.idToken || (googleUser as any)?.authentication?.accessToken;
-
-        if (!idToken) {
-          throw new Error('Não foi possível obter o Token de Autenticação do Google.');
+        let googleUser: any = null;
+        try {
+          googleUser = await GoogleAuth.signIn();
+        } catch (nativeErr: any) {
+          console.warn("Native GoogleAuth.signIn warning/error, trying web popup fallback:", nativeErr);
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          try {
+            const userCredential = await signInWithPopup(auth, provider);
+            firebaseUser = userCredential.user;
+          } catch (webFallbackErr: any) {
+            console.error("Web popup fallback error:", webFallbackErr);
+            throw webFallbackErr;
+          }
         }
 
-        const credential = GoogleAuthProvider.credential(idToken);
-        try {
-          const userCredential = await signInWithCredential(auth, credential);
-          firebaseUser = userCredential.user;
-        } catch (credErr: any) {
-          if (
-            credErr.code === 'auth/account-exists-with-different-credential' ||
-            credErr.code === 'auth/credential-already-in-use' ||
-            credErr.code === 'auth/email-already-in-use' ||
-            credErr?.message?.includes('account-exists-with-different-credential')
-          ) {
-            googleEmail = credErr.customData?.email || credErr.email || googleEmail;
-            firebaseUser = null;
-          } else {
-            throw credErr;
+        if (!firebaseUser && googleUser) {
+          googleEmail = googleUser?.email || null;
+          const idToken = googleUser?.authentication?.idToken || (googleUser as any)?.idToken || (googleUser as any)?.authentication?.accessToken;
+
+          if (!idToken) {
+            throw new Error('Não foi possível obter o Token de Autenticação do Google.');
+          }
+
+          const credential = GoogleAuthProvider.credential(idToken);
+          try {
+            const userCredential = await signInWithCredential(auth, credential);
+            firebaseUser = userCredential.user;
+          } catch (credErr: any) {
+            if (
+              credErr.code === 'auth/account-exists-with-different-credential' ||
+              credErr.code === 'auth/credential-already-in-use' ||
+              credErr.code === 'auth/email-already-in-use' ||
+              credErr?.message?.includes('account-exists-with-different-credential')
+            ) {
+              googleEmail = credErr.customData?.email || credErr.email || googleEmail;
+              firebaseUser = null;
+            } else {
+              throw credErr;
+            }
           }
         }
       } else {
@@ -1396,7 +1413,11 @@ export function useShoppingData() {
         throw new Error("A janela de autenticação do Google foi bloqueada pelo navegador. Permita pop-ups neste site para entrar com o Google.");
       }
       console.error("Erro ao autenticar com Google:", error);
-      throw new Error(error.message || "Erro ao conectar com o Google. Se você já possui conta com este e-mail, entre com sua senha ou recupere seu acesso.");
+      let rawMsg = error?.message || error?.toString() || '';
+      if (!rawMsg || rawMsg.includes('Something went wrong') || rawMsg.includes('DEVELOPER_ERROR') || rawMsg.includes('10') || rawMsg.includes('12500')) {
+        rawMsg = "Não foi possível conectar com o Google no dispositivo. Se você já tem cadastro com este e-mail, entre informando seu e-mail e senha no formulário ou redefina seu acesso em 'Esqueceu a senha?'.";
+      }
+      throw new Error(rawMsg);
     } finally {
       setIsSyncing(false);
     }

@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "901690992750-m9tpgql30vpfnsfp2ffbrubdll1gmndl.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.feirafacil.app",
+            "certificate_hash": "dacd06a8920674e0f9b7c9ac36b369713b10a9b8"
+          }
+        },
+        {
           "client_id": "901690992750-jbuc5p2bebr2940uaorqtn5qcp72q6cp.apps.googleusercontent.com",
           "client_type": 3
         }
