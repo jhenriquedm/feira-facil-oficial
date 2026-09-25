@@ -7,7 +7,7 @@ import { Category, Product, Purchase, PurchaseItem } from '../types';
 import { CategoryIcon, AVAILABLE_ICONS } from './CategoryIcon';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { sanitizeAndCapitalize, formatMoneyInput, parseMoneyToNumber, formatCurrencyBRL } from '../utils/textFormatters';
-import { PRODUCT_UNITS, normalizeProductUnit, getUnitCardDisplay } from '../utils/units';
+import { PRODUCT_UNITS, normalizeProductUnit, getUnitCardDisplay, isWeightUnit, getPriceLabel } from '../utils/units';
 import { normalizeBrand, formatBrandDisplay } from '../utils/brand';
 
 interface ProductsProps {
@@ -499,117 +499,149 @@ export function Products({
         </div>
       )}
 
-      {/* Tab Selector */}
-      <div className="flex border-b border-neutral-200">
-        <button
-          onClick={() => setActiveSubTab('products')}
-          className={`px-6 py-3 font-bold text-sm transition-all border-b-2 flex items-center gap-2 ${
-            activeSubTab === 'products'
-              ? 'border-sky-500 text-sky-500'
-              : 'border-transparent text-neutral-500 hover:text-neutral-700'
-          }`}
-        >
-          <ShoppingBasket size={18} />
-          Meus Produtos ({products.length})
-        </button>
-        <button
-          onClick={() => {
-            setActiveSubTab('categories');
-            // pre-set default category selection in form if needed
-            if (!prodCategoryId && categories.length > 0) {
-              setProdCategoryId(categories[0].id);
-            }
-          }}
-          className={`px-6 py-3 font-bold text-sm transition-all border-b-2 flex items-center gap-2 ${
-            activeSubTab === 'categories'
-              ? 'border-sky-500 text-sky-500'
-              : 'border-transparent text-neutral-500 hover:text-neutral-700'
-          }`}
-        >
-          <Tag size={18} />
-          Categorias ({categories.length})
-        </button>
+      {/* Sticky Header Container (Tabs, Search, Filter, Escanear & Novo Produto) */}
+      <div className="sticky top-16 z-20 bg-white/95 backdrop-blur-md pt-1 pb-3 -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 border-b border-neutral-200/80 shadow-2xs space-y-3">
+        {/* Tab Selector */}
+        <div className="flex border-b border-neutral-200">
+          <button
+            onClick={() => setActiveSubTab('products')}
+            className={`px-6 py-2.5 font-bold text-sm transition-all border-b-2 flex items-center gap-2 ${
+              activeSubTab === 'products'
+                ? 'border-sky-500 text-sky-500'
+                : 'border-transparent text-neutral-500 hover:text-neutral-700'
+            }`}
+          >
+            <ShoppingBasket size={18} />
+            Meus Produtos ({products.length})
+          </button>
+          <button
+            onClick={() => {
+              setActiveSubTab('categories');
+              // pre-set default category selection in form if needed
+              if (!prodCategoryId && categories.length > 0) {
+                setProdCategoryId(categories[0].id);
+              }
+            }}
+            className={`px-6 py-2.5 font-bold text-sm transition-all border-b-2 flex items-center gap-2 ${
+              activeSubTab === 'categories'
+                ? 'border-sky-500 text-sky-500'
+                : 'border-transparent text-neutral-500 hover:text-neutral-700'
+            }`}
+          >
+            <Tag size={18} />
+            Categorias ({categories.length})
+          </button>
+        </div>
+
+        {activeSubTab === 'products' && (
+          <div className="space-y-3">
+            {/* Barcode Success Feedback Banner */}
+            {barcodeSuccessBanner && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between gap-3 text-xs text-emerald-800 animate-in fade-in duration-200">
+                <div className="flex items-center gap-2 font-medium">
+                  <Sparkles size={16} className="text-emerald-600 shrink-0" />
+                  <span>{barcodeSuccessBanner}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBarcodeSuccessBanner(null)}
+                  className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-600"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+
+            {/* Products Header Controls (Search, Filter, Escanear, Novo Produto) */}
+            <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-4 justify-between items-stretch sm:items-center">
+              <div className="flex flex-1 flex-col sm:flex-row gap-2 sm:gap-3">
+                {/* Search */}
+                <div className="relative flex-1">
+                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                  <input
+                    type="text"
+                    placeholder="Pesquisar produto, marca ou código de barras..."
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 bg-neutral-50 hover:bg-white focus:bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                  />
+                </div>
+
+                {/* Category Filter */}
+                <select
+                  value={selectedCategoryFilter}
+                  onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                  className="px-3 sm:px-4 py-2 bg-neutral-50 hover:bg-white focus:bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+                >
+                  <option value="all">Todas as categorias</option>
+                  {sortedCategories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Scan Barcode Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBarcodeSuccessBanner(null);
+                    setIsScannerOpen(true);
+                  }}
+                  className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl text-sm font-bold shadow-xs transition-all"
+                  title="Cadastrar lendo código de barras pela câmera ou arquivo"
+                >
+                  <BarcodeIcon size={18} />
+                  <span>Escanear</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    resetProductForm();
+                    if (categories.length > 0) setProdCategoryId(categories[0].id);
+                    setShowProductForm(true);
+                  }}
+                  className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white rounded-xl text-sm font-bold shadow-xs transition-all"
+                >
+                  <Plus size={18} />
+                  <span>Novo Produto</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeSubTab === 'categories' && (
+          <div className="flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center pt-1">
+            <div className="relative flex-1">
+              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+              <input
+                type="text"
+                placeholder="Pesquisar categoria..."
+                value={categorySearch}
+                onChange={(e) => setCategorySearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-neutral-50 hover:bg-white focus:bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all"
+              />
+            </div>
+
+            <button
+              onClick={() => {
+                resetCategoryForm();
+                setShowCategoryForm(true);
+              }}
+              className="flex items-center justify-center gap-2 px-5 py-2.5 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white rounded-xl text-sm font-bold shadow-xs transition-all"
+            >
+              <FolderPlus size={18} />
+              <span>Nova Categoria</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {activeSubTab === 'products' && (
         <div className="space-y-4">
-          {/* Barcode Success Feedback Banner */}
-          {barcodeSuccessBanner && (
-            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-emerald-800 animate-in fade-in duration-200">
-              <div className="flex items-center gap-2 font-medium">
-                <Sparkles size={16} className="text-emerald-600 shrink-0" />
-                <span>{barcodeSuccessBanner}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setBarcodeSuccessBanner(null)}
-                className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-600"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          )}
-
-          {/* Products Header Controls */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-between items-stretch sm:items-center">
-            <div className="flex flex-1 flex-col sm:flex-row gap-3">
-              {/* Search */}
-              <div className="relative flex-1">
-                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                <input
-                  type="text"
-                  placeholder="Pesquisar produto, marca ou código de barras..."
-                  value={productSearch}
-                  onChange={(e) => setProductSearch(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-                />
-              </div>
-
-              {/* Category Filter */}
-              <select
-                value={selectedCategoryFilter}
-                onChange={(e) => setSelectedCategoryFilter(e.target.value)}
-                className="px-4 py-2 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
-              >
-                <option value="all">Todas as categorias</option>
-                {sortedCategories.map((cat) => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {/* Scan Barcode Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setBarcodeSuccessBanner(null);
-                  setIsScannerOpen(true);
-                }}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl text-sm font-bold shadow-sm transition-all"
-                title="Cadastrar lendo código de barras pela câmera ou arquivo"
-              >
-                <BarcodeIcon size={18} />
-                <span className="hidden md:inline">Ler Código de Barras</span>
-                <span className="md:hidden">Escanear</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  resetProductForm();
-                  if (categories.length > 0) setProdCategoryId(categories[0].id);
-                  setShowProductForm(true);
-                }}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white rounded-xl text-sm font-bold shadow-sm transition-all"
-              >
-                <Plus size={18} />
-                <span>Novo Produto</span>
-              </button>
-            </div>
-          </div>
-
           {/* Product form modal dialog (creation and edition) */}
           {showProductForm && (
             <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto overscroll-contain animate-in fade-in">
@@ -757,7 +789,9 @@ export function Products({
 
                   {/* Last Price */}
                   <div>
-                    <label className="block text-xs font-bold text-neutral-500 mb-1">Preço Atual / Último Preço (R$)</label>
+                    <label className="block text-xs font-bold text-neutral-500 mb-1">
+                      {isWeightUnit(prodUnit) ? 'Preço de Referência (Valor do Kg / g)' : 'Preço Atual / Último Preço (R$)'}
+                    </label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-neutral-400">R$</span>
                       <input
@@ -800,9 +834,9 @@ export function Products({
             </div>
           )}
 
-          {/* Product Grid / List */}
+          {/* Product Grid / List with Custom Scrollbar */}
           {filteredProducts.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 max-h-[calc(100dvh-270px)] sm:max-h-[calc(100dvh-240px)] overflow-y-auto overscroll-contain pr-1 py-1 scrollbar-thin scrollbar-thumb-neutral-300 scrollbar-track-neutral-100/50">
               {filteredProducts.map((prod) => {
                 const cat = categories.find(c => c.id === prod.categoryId);
                 return (
@@ -877,30 +911,7 @@ export function Products({
 
       {activeSubTab === 'categories' && (
         <div className="space-y-4">
-          {/* Categories Header Controls */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-between items-stretch sm:items-center">
-            <div className="relative flex-1">
-              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-              <input
-                type="text"
-                placeholder="Pesquisar categoria..."
-                value={categorySearch}
-                onChange={(e) => setCategorySearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none"
-              />
-            </div>
 
-            <button
-              onClick={() => {
-                resetCategoryForm();
-                setShowCategoryForm(true);
-              }}
-              className="flex items-center justify-center gap-2 px-5 py-2.5 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white rounded-xl text-sm font-bold shadow-sm transition-all"
-            >
-              <FolderPlus size={18} />
-              Nova Categoria
-            </button>
-          </div>
 
           {/* Category Form */}
           {showCategoryForm && (
@@ -1008,9 +1019,9 @@ export function Products({
             </div>
           )}
 
-          {/* Categories list */}
+          {/* Categories list with Custom Scrollbar */}
           {filteredCategories.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5 max-h-[calc(100dvh-270px)] sm:max-h-[calc(100dvh-240px)] overflow-y-auto overscroll-contain pr-1 py-1 scrollbar-thin scrollbar-thumb-neutral-300 scrollbar-track-neutral-100/50">
               {filteredCategories.map((cat) => (
                 <div key={cat.id} className="bg-white p-4 rounded-2xl border border-neutral-200 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">

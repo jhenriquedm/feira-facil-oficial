@@ -14,14 +14,24 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.4.7',
-  buildNumber: 57,
-  releaseDate: '2026-09-24',
+  version: '1.4.8',
+  buildNumber: 58,
+  releaseDate: '2026-09-25',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.4.8',
+      date: '2026-09-25',
+      highlights: [
+        'Menu kebab (⋮) no topo direito dos cards de produto com opções de edição e exclusão',
+        'Conversão inteligente de peso automática para números de 4 dígitos ou mais (1000g -> 1kg, 1500g -> 1,5kg, 1700g -> 1,7kg) limitada a 999kg',
+        'Formatação decimal limpa sem zeros redundantes',
+        'Bloqueio rigoroso de letras e caracteres especiais em campos de quantidade e peso'
+      ]
+    },
     {
       version: '1.4.7',
       date: '2026-09-24',

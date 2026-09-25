@@ -9,8 +9,17 @@ import {
 import { Purchase, PurchaseType, PurchaseItem, Product, Category, PURCHASE_TYPE_LABELS } from '../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import { ReceiptOcrModal, OcrExtractedItem } from './ReceiptOcrModal';
-import { sanitizeAndCapitalize, formatMoneyInput, parseMoneyToNumber, formatCurrencyBRL } from '../utils/textFormatters';
-import { PRODUCT_UNITS, normalizeProductUnit, getUnitCardDisplay } from '../utils/units';
+import { sanitizeAndCapitalize, formatMoneyInput, parseMoneyToNumber, formatCurrencyBRL, sanitizeQuantityInput } from '../utils/textFormatters';
+import { 
+  PRODUCT_UNITS, 
+  normalizeProductUnit, 
+  getUnitCardDisplay, 
+  isWeightUnit, 
+  parseWeightQuantity, 
+  formatQuantityDisplay, 
+  getPriceLabel,
+  formatWeightValueOnly 
+} from '../utils/units';
 import { normalizeBrand, formatBrandDisplay, isSameBrand } from '../utils/brand';
 
 interface PurchasesProps {
@@ -84,6 +93,7 @@ export function Purchases({
   // Active purchase kebab menu state
   const [isKebabOpen, setIsKebabOpen] = useState(false);
   const kebabRef = useRef<HTMLDivElement>(null);
+  const [openKebabItemId, setOpenKebabItemId] = useState<string | null>(null);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -651,7 +661,7 @@ export function Purchases({
       return;
     }
 
-    const qty = parseFloat(itemQty);
+    const qty = parseWeightQuantity(itemQty, prod.unit);
     if (isNaN(qty) || qty <= 0) {
       showItemErrorTimed("A quantidade do item deve ser maior que zero.");
       return;
@@ -659,7 +669,7 @@ export function Purchases({
 
     const price = parseMoneyToNumber(itemPrice);
     if (isNaN(price) || price < 0) {
-      showItemErrorTimed("O preço unitário não pode ser negativo.");
+      showItemErrorTimed(isWeightUnit(prod.unit) ? "O valor do Kg / g não pode ser negativo." : "O preço unitário não pode ser negativo.");
       return;
     }
 
@@ -693,7 +703,18 @@ export function Purchases({
 
   const handleQuickQtyChange = async (item: PurchaseItem, delta: number) => {
     if (!selectedPurchaseId) return;
-    const newQty = Math.max(0, Number((item.quantity + delta).toFixed(2)));
+    const isWeight = isWeightUnit(item.unit);
+    let step = delta;
+    if (isWeight) {
+      if (item.quantity <= 1 && delta < 0) {
+        step = -0.1;
+      } else if (item.quantity < 1 && delta > 0) {
+        step = 0.1;
+      } else {
+        step = delta * 0.5;
+      }
+    }
+    const newQty = Math.max(0, Number((item.quantity + step).toFixed(3)));
     if (newQty <= 0) {
       setItemToDelete(item);
       return;
@@ -703,14 +724,14 @@ export function Purchases({
 
   const handleSaveInlineEdit = async (item: PurchaseItem) => {
     if (!selectedPurchaseId) return;
-    const q = parseFloat(editItemQty);
+    const q = parseWeightQuantity(editItemQty, item.unit);
     const p = parseMoneyToNumber(editItemPrice);
     if (isNaN(q) || q <= 0) {
-      setInlineEditError("A quantidade deve ser maior que zero.");
+      setInlineEditError("A quantidade/peso deve ser maior que zero.");
       return;
     }
     if (isNaN(p) || p < 0) {
-      setInlineEditError("O preço unitário não pode ser negativo.");
+      setInlineEditError(isWeightUnit(item.unit) ? "O valor do Kg / g não pode ser negativo." : "O preço unitário não pode ser negativo.");
       return;
     }
     setInlineEditError(null);
@@ -879,15 +900,17 @@ export function Purchases({
       return { type: 'stable' as const, label: 'Preço igual' };
     }
     if (diff < 0) {
+      const unitSuffix = isWeightUnit(item.unit) ? '/kg' : '/un';
       return { 
         type: 'cheaper' as const, 
-        label: `Economia de ${formatCurrency(Math.abs(diff))}/un`,
+        label: `Economia de ${formatCurrency(Math.abs(diff))}${unitSuffix}`,
         diff: Math.abs(diff)
       };
     }
+    const unitSuffix = isWeightUnit(item.unit) ? '/kg' : '';
     return { 
       type: 'expensive' as const, 
-      label: `+${formatCurrency(diff)} vs anterior`,
+      label: `+${formatCurrency(diff)}${unitSuffix} vs anterior`,
       diff
     };
   };
@@ -1787,23 +1810,62 @@ export function Purchases({
                   )}
                 </div>
 
-                {/* Qty */}
+                {/* Qty / Weight */}
                 <div>
-                  <label className="block text-xs font-bold text-neutral-500 mb-1">Quantidade *</label>
+                  <label className="block text-xs font-bold text-neutral-500 mb-1">
+                    {(() => {
+                      const selProd = products.find(p => p.id === selectedProductId);
+                      return selProd && isWeightUnit(selProd.unit) 
+                        ? 'Quantidade / Peso (ex: 500g ou 1,5kg) *' 
+                        : 'Quantidade *';
+                    })()}
+                  </label>
                   <input
-                    type="number"
-                    step="any"
-                    min="0.01"
+                    type="text"
+                    inputMode="decimal"
                     required
+                    placeholder={(() => {
+                      const selProd = products.find(p => p.id === selectedProductId);
+                      return selProd && isWeightUnit(selProd.unit) ? 'Ex: 1500 ou 500' : '1';
+                    })()}
                     value={itemQty}
-                    onChange={(e) => setItemQty(e.target.value)}
+                    onChange={(e) => {
+                      const selProd = products.find(p => p.id === selectedProductId);
+                      const allowDec = selProd ? isWeightUnit(selProd.unit) : true;
+                      setItemQty(sanitizeQuantityInput(e.target.value, allowDec));
+                    }}
+                    onBlur={(e) => {
+                      const selProd = products.find(p => p.id === selectedProductId);
+                      if (selProd && isWeightUnit(selProd.unit) && e.target.value.trim()) {
+                        const parsed = parseWeightQuantity(e.target.value, selProd.unit);
+                        if (parsed > 0) {
+                          setItemQty(formatWeightValueOnly(parsed, selProd.unit));
+                        }
+                      }
+                    }}
                     className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
+                  {(() => {
+                    const selProd = products.find(p => p.id === selectedProductId);
+                    if (selProd && isWeightUnit(selProd.unit)) {
+                      return (
+                        <span className="text-[10px] text-neutral-400 mt-1 block">
+                          Digite em gramas (ex: <strong>500</strong> para 500g, <strong>1000</strong> para 1kg, <strong>1500</strong> para 1,5kg, <strong>1700</strong> para 1,7kg) ou quilos (ex: <strong>1,5</strong> ou <strong>1.5</strong> - máx. 999 kg).
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
 
                 {/* Price */}
                 <div>
-                  <label className="block text-xs font-bold text-neutral-500 mb-1">Preço Unitário (R$) *</label>
+                  <label className="block text-xs font-bold text-neutral-500 mb-1">
+                    {(() => {
+                      const selProd = products.find(p => p.id === selectedProductId);
+                      return selProd ? `${getPriceLabel(selProd.unit)} (R$) *` : 'Preço Unitário (R$) *';
+                    })()}
+                  </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-neutral-400">R$</span>
                     <input
@@ -1834,16 +1896,24 @@ export function Purchases({
               </div>
 
               {/* Live Subtotal Preview */}
-              {parseFloat(itemQty) > 0 && parseMoneyToNumber(itemPrice) > 0 && (
-                <div className="flex items-center justify-between p-3 bg-sky-50/70 rounded-xl border border-sky-100 text-xs">
-                  <span className="font-semibold text-sky-800">
-                    Subtotal Calculado ({itemQty} × {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parseMoneyToNumber(itemPrice))}):
-                  </span>
-                  <span className="font-black text-sm text-sky-700">
-                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((parseFloat(itemQty) || 0) * parseMoneyToNumber(itemPrice))}
-                  </span>
-                </div>
-              )}
+              {(() => {
+                const selProd = products.find(p => p.id === selectedProductId);
+                const parsedQ = parseWeightQuantity(itemQty, selProd?.unit);
+                const parsedP = parseMoneyToNumber(itemPrice);
+                if (parsedQ > 0 && parsedP > 0) {
+                  return (
+                    <div className="flex items-center justify-between p-3 bg-sky-50/70 rounded-xl border border-sky-100 text-xs">
+                      <span className="font-semibold text-sky-800">
+                        Subtotal Calculado ({formatQuantityDisplay(parsedQ, selProd?.unit)} × {formatCurrency(parsedP)}):
+                      </span>
+                      <span className="font-black text-sm text-sky-700">
+                        {formatCurrency(parsedQ * parsedP)}
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
@@ -1979,7 +2049,7 @@ export function Purchases({
                       <div key={item.id} className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-red-100 shadow-xs">
                         <div className="min-w-0 pr-2">
                           <span className="text-xs font-black text-neutral-900 block truncate">{item.productName}</span>
-                          <span className="text-[10px] text-neutral-400">Qtd: {item.quantity} {item.unit}</span>
+                          <span className="text-[10px] text-neutral-400">Qtd: {formatQuantityDisplay(item.quantity, item.unit)}</span>
                         </div>
                         <button
                           type="button"
@@ -1991,7 +2061,7 @@ export function Purchases({
                           }}
                           className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 rounded-lg text-xs font-bold shrink-0 transition-colors"
                         >
-                          Definir Preço
+                          {isWeightUnit(item.unit) ? 'Definir Valor Kg / g' : 'Definir Preço'}
                         </button>
                       </div>
                     ))}
@@ -2700,14 +2770,70 @@ export function Purchases({
     return (
       <div 
         key={item.id} 
-        className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-4 transition-all ${
+        className={`relative flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:p-4 gap-3 transition-all ${
           item.isChecked 
             ? 'bg-neutral-50/50' 
             : 'hover:bg-neutral-50/30'
         }`}
       >
+        {/* Top-Right Kebab Menu for Item */}
+        {!isCompleted && (
+          <div className="absolute top-3 right-3 z-10">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenKebabItemId(openKebabItemId === item.id ? null : item.id);
+                }}
+                className="p-1.5 text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 active:bg-neutral-200 rounded-lg transition-all"
+                title="Opções do item"
+              >
+                <MoreVertical size={16} />
+              </button>
+
+              {openKebabItemId === item.id && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-30" 
+                    onClick={() => setOpenKebabItemId(null)} 
+                  />
+                  <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-neutral-200 rounded-2xl shadow-xl z-40 py-1.5 animate-in fade-in zoom-in-95 duration-150">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenKebabItemId(null);
+                        setEditingItemId(item.id);
+                        setEditItemQty(String(item.quantity));
+                        setEditItemPrice(formatMoneyInput(item.unitPrice));
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-sky-50 text-sky-700 text-xs font-bold flex items-center gap-2.5 transition-colors"
+                    >
+                      <Edit3 size={14} className="text-sky-500" />
+                      <span>Editar Detalhes</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenKebabItemId(null);
+                        if (activePurchase) {
+                          setItemToDelete(item);
+                        }
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-red-50 text-red-600 text-xs font-bold flex items-center gap-2.5 transition-colors border-t border-neutral-100"
+                    >
+                      <Trash2 size={14} className="text-red-500" />
+                      <span>Excluir da Lista</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Checkbox and Product details */}
-        <div className="flex items-center gap-3 flex-1 min-w-0">
+        <div className="flex items-center gap-3 flex-1 min-w-0 pr-8 sm:pr-0">
           {!isCompleted ? (
             <input
               type="checkbox"
@@ -2775,9 +2901,9 @@ export function Purchases({
 
               {/* Zero Price Warning on Item in Cart */}
               {item.isChecked && (!item.unitPrice || item.unitPrice <= 0) && !isCompleted && (
-                <span className="inline-flex items-center gap-1 font-black text-[9px] text-red-700 bg-red-100 border border-red-300 px-2 py-0.5 rounded-full animate-pulse">
+                <span className="inline-flex items-center gap-1 font-black text-[9px] text-red-700 bg-red-100 border border-red-300 px-2 py-0.5 rounded-full animate-pulse whitespace-nowrap">
                   <AlertCircle size={10} className="text-red-600 shrink-0" />
-                  Preço zerado (R$ 0,00)
+                  {isWeightUnit(item.unit) ? 'Valor Kg/g zerado (R$ 0,00)' : 'Preço zerado (R$ 0,00)'}
                 </span>
               )}
             </div>
@@ -2785,26 +2911,34 @@ export function Purchases({
         </div>
 
         {/* Quantities, Inline Controls & Price */}
-        <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0">
+        <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-3 shrink-0 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-neutral-100">
           {isEditing ? (
-            <div className="flex flex-col gap-1.5 bg-neutral-50 p-2.5 rounded-xl border border-sky-300">
+            <div className="flex flex-col gap-1.5 bg-neutral-50 p-2.5 rounded-xl border border-sky-300 w-full sm:w-auto">
               <div className="flex items-center gap-2">
-                <div className="w-16">
-                  <label className="text-[9px] font-bold text-neutral-400 block">Qtd</label>
+                <div className="w-20">
+                  <label className="text-[9px] font-bold text-neutral-400 block whitespace-nowrap">{isWeightUnit(item.unit) ? 'Qtd / Peso' : 'Qtd'}</label>
                   <input
-                    type="number"
-                    step="any"
-                    min="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={isWeightUnit(item.unit) ? "1500 ou 500" : "1"}
                     value={editItemQty}
                     onChange={(e) => {
-                      setEditItemQty(e.target.value);
+                      setEditItemQty(sanitizeQuantityInput(e.target.value, isWeightUnit(item.unit)));
                       setInlineEditError(null);
                     }}
-                    className="w-full px-1.5 py-0.5 text-xs bg-white border border-neutral-300 rounded"
+                    onBlur={(e) => {
+                      if (isWeightUnit(item.unit) && e.target.value.trim()) {
+                        const parsed = parseWeightQuantity(e.target.value, item.unit);
+                        if (parsed > 0) {
+                          setEditItemQty(formatWeightValueOnly(parsed, item.unit));
+                        }
+                      }
+                    }}
+                    className="w-full px-1.5 py-0.5 text-xs bg-white border border-neutral-300 rounded font-medium"
                   />
                 </div>
                 <div className="w-24">
-                  <label className="text-[9px] font-bold text-neutral-400 block">Preço (R$)</label>
+                  <label className="text-[9px] font-bold text-neutral-400 block whitespace-nowrap">{getPriceLabel(item.unit, true)} (R$)</label>
                   <input
                     type="text"
                     inputMode="numeric"
@@ -2840,30 +2974,104 @@ export function Purchases({
                   </button>
                 </div>
               </div>
+              {isWeightUnit(item.unit) && (
+                <span className="text-[8px] text-neutral-400">
+                  Dica: digite <strong>500</strong> para 500g, <strong>1000</strong> para 1kg, <strong>1500</strong> para 1,5kg, <strong>1700</strong> para 1,7kg (máx. 999kg).
+                </span>
+              )}
               {inlineEditError && (
                 <span className="text-[10px] text-red-500 font-bold">{inlineEditError}</span>
               )}
             </div>
           ) : (
-            <div className="flex items-center gap-4">
-              {/* Quick Qty +/- buttons */}
+            <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto">
+              {/* Quick Direct-Editable Qty +/- Counter */}
               {!isCompleted && (
-                <div className="flex items-center gap-1 bg-neutral-100 rounded-xl p-1 border border-neutral-200/60">
+                <div className="flex items-center gap-0.5 sm:gap-1 bg-neutral-100 rounded-xl p-0.5 sm:p-1 border border-neutral-200/80 shadow-2xs shrink-0">
                   <button
                     type="button"
                     onClick={() => handleQuickQtyChange(item, -1)}
-                    className="p-1 hover:bg-white text-neutral-600 rounded-lg transition-all"
+                    className="p-1 hover:bg-white active:bg-neutral-200 text-neutral-600 rounded-lg transition-all"
                     title="Diminuir quantidade"
                   >
                     <MinusCircle size={14} />
                   </button>
-                  <span className="px-1 text-xs font-black text-neutral-900 min-w-[20px] text-center">
-                    {item.quantity}
-                  </span>
+                  
+                  {isWeightUnit(item.unit) ? (
+                    <div className="flex items-center bg-white border border-neutral-200 rounded-md px-1.5 py-0.5 shadow-2xs">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        defaultValue={formatWeightValueOnly(item.quantity, item.unit)}
+                        key={`weight-${item.id}-${item.quantity}`}
+                        onChange={(e) => {
+                          const sanitized = sanitizeQuantityInput(e.target.value, true);
+                          if (e.target.value !== sanitized) {
+                            e.target.value = sanitized;
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const sanitized = sanitizeQuantityInput(e.target.value, true);
+                          const parsed = parseWeightQuantity(sanitized, item.unit);
+                          if (parsed > 0 && selectedPurchaseId) {
+                            if (parsed !== item.quantity) {
+                              updatePurchaseItem(selectedPurchaseId, item.id, { quantity: parsed });
+                            } else {
+                              e.target.value = formatWeightValueOnly(parsed, item.unit);
+                            }
+                          } else {
+                            e.target.value = formatWeightValueOnly(item.quantity, item.unit);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            (e.target as HTMLInputElement).blur();
+                          }
+                        }}
+                        className="w-12 sm:w-14 text-center text-xs font-black text-neutral-900 bg-transparent focus:outline-none"
+                        title="Toque para digitar o peso (ex: 500 para 500g ou 1500 para 1,5kg)"
+                      />
+                      <span className="text-[10px] font-bold text-neutral-400 select-none pl-0.5">
+                        {item.quantity < 1 ? 'g' : 'kg'}
+                      </span>
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      defaultValue={item.quantity}
+                      key={`unit-${item.id}-${item.quantity}`}
+                      onChange={(e) => {
+                        const sanitized = sanitizeQuantityInput(e.target.value, false, 4);
+                        if (e.target.value !== sanitized) {
+                          e.target.value = sanitized;
+                        }
+                      }}
+                      onBlur={(e) => {
+                        const sanitized = sanitizeQuantityInput(e.target.value, false, 4);
+                        const val = parseInt(sanitized, 10);
+                        if (!isNaN(val) && val > 0 && selectedPurchaseId) {
+                          if (val !== item.quantity) {
+                            updatePurchaseItem(selectedPurchaseId, item.id, { quantity: val });
+                          }
+                        } else {
+                          e.target.value = String(item.quantity);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          (e.target as HTMLInputElement).blur();
+                        }
+                      }}
+                      className="w-9 text-center text-xs font-black text-neutral-900 bg-white border border-neutral-200 rounded-md px-1 py-0.5 shadow-2xs focus:outline-none"
+                      title="Toque para alterar a quantidade"
+                    />
+                  )}
+
                   <button
                     type="button"
                     onClick={() => handleQuickQtyChange(item, 1)}
-                    className="p-1 hover:bg-white text-neutral-600 rounded-lg transition-all"
+                    className="p-1 hover:bg-white active:bg-neutral-200 text-neutral-600 rounded-lg transition-all"
                     title="Aumentar quantidade"
                   >
                     <PlusCircle size={14} />
@@ -2872,50 +3080,20 @@ export function Purchases({
               )}
 
               {/* Price details */}
-              <div className="text-right">
-                <span className="text-[10px] text-neutral-400 block font-semibold">Unitário</span>
-                <span className={`text-xs font-bold ${item.isChecked && (!item.unitPrice || item.unitPrice <= 0) && !isCompleted ? 'text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded font-black' : 'text-neutral-600'}`}>
+              <div className="text-right shrink-0 min-w-[56px]">
+                <span className="text-[10px] text-neutral-400 block font-semibold whitespace-nowrap">{getPriceLabel(item.unit, true)}</span>
+                <span className={`text-xs font-bold whitespace-nowrap ${item.isChecked && (!item.unitPrice || item.unitPrice <= 0) && !isCompleted ? 'text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded font-black' : 'text-neutral-600'}`}>
                   {formatCurrency(item.unitPrice)}
                 </span>
               </div>
 
               {/* Total */}
-              <div className="text-right min-w-[75px]">
-                <span className="text-[10px] text-neutral-400 block font-semibold">Total</span>
-                <span className="text-sm font-extrabold text-neutral-900">
+              <div className="text-right shrink-0 min-w-[60px]">
+                <span className="text-[10px] text-neutral-400 block font-semibold whitespace-nowrap">Total</span>
+                <span className="text-xs sm:text-sm font-extrabold text-neutral-900 whitespace-nowrap">
                   {formatCurrency(total)}
                 </span>
               </div>
-
-              {/* Actions */}
-              {!isCompleted && (
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingItemId(item.id);
-                      setEditItemQty(String(item.quantity));
-                      setEditItemPrice(formatMoneyInput(item.unitPrice));
-                    }}
-                    className="p-1.5 text-neutral-500 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-all"
-                    title="Editar quantidade e preço"
-                  >
-                    <Edit3 size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (activePurchase) {
-                        setItemToDelete(item);
-                      }
-                    }}
-                    className="p-1.5 hover:bg-red-50 text-red-500 rounded-lg transition-all"
-                    title="Remover da lista"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              )}
             </div>
           )}
         </div>

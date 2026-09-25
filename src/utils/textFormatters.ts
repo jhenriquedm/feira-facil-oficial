@@ -171,3 +171,44 @@ export function formatPhone(value: string): string {
   if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
 }
+
+/**
+ * Sanitizes quantity / weight input:
+ * - Accepts only numbers (0-9)
+ * - If allowDecimal is true, allows at most one decimal separator (, or .)
+ * - Strips all letters, accents, spaces, and special characters immediately
+ * - Caps maximum input length (default 6 characters)
+ */
+export function sanitizeQuantityInput(
+  value: string, 
+  allowDecimal: boolean = true,
+  maxLength: number = 6
+): string {
+  if (!value) return '';
+
+  if (!allowDecimal) {
+    // Strictly digits 0-9
+    return value.replace(/\D/g, '').slice(0, maxLength);
+  }
+
+  // Remove any character that is not a digit, comma, or dot
+  const cleanChars = value.replace(/[^0-9,\.]/g, '');
+
+  // Keep at most one decimal separator (the first one)
+  let separatorFound = false;
+  let result = '';
+
+  for (let i = 0; i < cleanChars.length; i++) {
+    const char = cleanChars[i];
+    if (char === ',' || char === '.') {
+      if (!separatorFound) {
+        result += char;
+        separatorFound = true;
+      }
+    } else {
+      result += char;
+    }
+  }
+
+  return result.slice(0, maxLength);
+}

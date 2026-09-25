@@ -5,7 +5,8 @@ import {
   parseMoneyToNumber, 
   formatCurrencyBRL, 
   formatCPF, 
-  validateCPF 
+  validateCPF,
+  sanitizeQuantityInput
 } from '../utils/textFormatters';
 
 describe('Text Formatters & Sanitizers', () => {
@@ -64,6 +65,34 @@ describe('Text Formatters & Sanitizers', () => {
       // Known valid CPF checksums
       expect(validateCPF('52998224725')).toBe(true);
       expect(validateCPF('529.982.247-25')).toBe(true);
+    });
+  });
+
+  describe('sanitizeQuantityInput', () => {
+    it('strips all letters and special characters', () => {
+      expect(sanitizeQuantityInput('abc123def')).toBe('123');
+      expect(sanitizeQuantityInput('1500kg')).toBe('1500');
+      expect(sanitizeQuantityInput('500g')).toBe('500');
+      expect(sanitizeQuantityInput('@#$1.5%&*')).toBe('1.5');
+      expect(sanitizeQuantityInput('1,500!')).toBe('1,500');
+      expect(sanitizeQuantityInput('texto puro')).toBe('');
+      expect(sanitizeQuantityInput('-15')).toBe('15');
+    });
+
+    it('allows only one decimal separator (comma or dot)', () => {
+      expect(sanitizeQuantityInput('1.5.0')).toBe('1.50');
+      expect(sanitizeQuantityInput('1,5,0')).toBe('1,50');
+      expect(sanitizeQuantityInput('1.5,0')).toBe('1.50');
+    });
+
+    it('strips all decimals when allowDecimal is false', () => {
+      expect(sanitizeQuantityInput('1.5', false)).toBe('15');
+      expect(sanitizeQuantityInput('1,5', false)).toBe('15');
+      expect(sanitizeQuantityInput('10 unidades', false)).toBe('10');
+    });
+
+    it('respects maxLength limit', () => {
+      expect(sanitizeQuantityInput('123456789', true, 5)).toBe('12345');
     });
   });
 });

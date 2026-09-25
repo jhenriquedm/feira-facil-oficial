@@ -7,6 +7,7 @@ import {
 import { Purchase, PurchaseItem, Category, Product, PURCHASE_TYPE_LABELS } from '../types';
 import { formatBrandDisplay } from '../utils/brand';
 import { getApiUrl } from '../utils/apiConfig';
+import { isWeightUnit, formatQuantityDisplay, getPriceLabel } from '../utils/units';
 
 interface ReportsProps {
   purchases: Purchase[];
@@ -737,7 +738,7 @@ export function Reports({ purchases, purchaseItems, products, categories }: Repo
                               <th className="py-2">Sessão / Lista</th>
                               <th className="py-2">Supermercado</th>
                               <th className="py-2 text-right">Qtd</th>
-                              <th className="py-2 text-right">Preço Unitário</th>
+                              <th className="py-2 text-right">{trackerProduct ? getPriceLabel(trackerProduct.unit) : 'Preço Unitário'}</th>
                               <th className="py-2 text-right">Total Pago</th>
                             </tr>
                           </thead>
@@ -757,7 +758,7 @@ export function Reports({ purchases, purchaseItems, products, categories }: Repo
                                     {h.market}
                                   </td>
                                   <td className="py-2.5 text-right font-medium text-neutral-600">
-                                    {h.quantity} {trackerProduct.unit}
+                                    {formatQuantityDisplay(h.quantity, trackerProduct.unit)}
                                   </td>
                                   <td className="py-2.5 text-right font-extrabold">
                                     <span className={`px-2 py-0.5 rounded-full ${
