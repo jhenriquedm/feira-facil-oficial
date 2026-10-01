@@ -338,6 +338,7 @@ export default function App() {
             addPurchaseItem={data.addPurchaseItem}
             updatePurchaseItem={data.updatePurchaseItem}
             deletePurchaseItem={data.deletePurchaseItem}
+            deleteAllPurchaseItems={data.deleteAllPurchaseItems}
             toggleItemChecked={data.toggleItemChecked}
             toggleAllItemsChecked={data.toggleAllItemsChecked}
             completePurchase={data.completePurchase}

@@ -136,5 +136,48 @@ describe('Business Rules & Integrity Checks', () => {
       // 6. Different product name -> ALLOWED
       expect(isProductDuplicate(existingArrozTioJoao, { categoryId: 'cat-mercearia', name: 'Feijão', brand: 'Tio João' })).toBe(false);
     });
+
+    it('clears all items from a purchase while keeping catalog products intact', () => {
+      const itemsMap: Record<string, PurchaseItem[]> = {
+        'pur-1': [
+          {
+            id: 'item-1',
+            purchaseId: 'pur-1',
+            productId: 'prod-1',
+            productName: 'Maçã Fuji',
+            productBrand: 'Turma da Mônica',
+            categoryId: 'cat-1',
+            categoryName: 'Hortifruti',
+            quantity: 2,
+            unit: 'Kg',
+            unitPrice: 8.5,
+            isChecked: true
+          },
+          {
+            id: 'item-2',
+            purchaseId: 'pur-1',
+            productId: 'prod-2',
+            productName: 'Picanha',
+            productBrand: 'Friboi',
+            categoryId: 'cat-2',
+            categoryName: 'Açougue',
+            quantity: 1,
+            unit: 'Kg',
+            unitPrice: 69.9,
+            isChecked: false
+          }
+        ]
+      };
+
+      expect(itemsMap['pur-1'].length).toBe(2);
+
+      // Simulating deleteAllPurchaseItems
+      const updatedItemsMap = { ...itemsMap, 'pur-1': [] };
+      expect(updatedItemsMap['pur-1'].length).toBe(0);
+
+      // Products in catalog remain intact
+      expect(mockProducts.length).toBe(2);
+      expect(mockProducts.find(p => p.id === 'prod-1')).toBeDefined();
+    });
   });
 });

@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { 
   Camera, Image as ImageIcon, X, RefreshCw, Check, AlertCircle, 
   Trash2, Plus, Sparkles, Store, Calendar, FileText, CheckCircle2,
   Receipt, ArrowRight, DollarSign, Tag, HelpCircle, Flashlight,
-  Smartphone, Info
+  Smartphone, Info, QrCode, Link as LinkIcon, CheckCheck
 } from 'lucide-react';
 import { Category, Product } from '../types';
 import { sanitizeAndCapitalize } from '../utils/textFormatters';
@@ -59,13 +60,16 @@ export function ReceiptOcrModal({
   onConfirmNewPurchase,
   onConfirmAddToActivePurchase
 }: ReceiptOcrModalProps) {
+  const [activeTab, setActiveTab] = useState<'camera' | 'gallery' | 'manual'>('camera');
   const [step, setStep] = useState<'capture' | 'processing' | 'review'>('capture');
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [processingStatus, setProcessingStatus] = useState('Consultando Cupom Fiscal na SEFAZ...');
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [scannedUrl, setScannedUrl] = useState<string | null>(null);
+  const [manualQrUrl, setManualQrUrl] = useState('');
 
-  // Camera and Focus Enhancements for Receipts
+  // Camera & Viewfinder Controls
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [hasHardwareZoom, setHasHardwareZoom] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
@@ -83,13 +87,42 @@ export function ReceiptOcrModal({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraCaptureInputRef = useRef<HTMLInputElement>(null);
+  const zxingReaderRef = useRef<BrowserMultiFormatReader | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const stopScanningLoopRef = useRef(false);
+
+  // Sound beep & haptic feedback on scan
+  const playBeep = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(980, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    } catch {
+      // audio context maybe unsupported/blocked
+    }
+
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate(80);
+      } catch {
+        // ignore
+      }
+    }
+  };
 
   // Reset state on open/close
   useEffect(() => {
     if (isOpen) {
       setStep('capture');
-      setImagePreview(null);
+      setActiveTab('camera');
       setErrorMessage('');
       setIsProcessing(false);
       setExtractedItems([]);
@@ -97,10 +130,14 @@ export function ReceiptOcrModal({
       setExtractedTotal(undefined);
       setExtractedDiscount(undefined);
       setPurchaseTitle('');
+      setScannedUrl(null);
+      setManualQrUrl('');
       setZoomLevel(1);
       setTorchOn(false);
       setFocusRing(null);
       setExtractedDate(new Date().toISOString().substring(0, 10));
+      // Auto-start camera when modal opens
+      startCamera();
     } else {
       stopCamera();
     }
@@ -110,6 +147,19 @@ export function ReceiptOcrModal({
   }, [isOpen]);
 
   const stopCamera = () => {
+    stopScanningLoopRef.current = true;
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (zxingReaderRef.current) {
+      try {
+        zxingReaderRef.current.reset();
+      } catch {
+        // ignore
+      }
+      zxingReaderRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -121,7 +171,7 @@ export function ReceiptOcrModal({
   const handleZoomChange = async (targetZoom: number) => {
     setZoomLevel(targetZoom);
 
-    // 1. Hardware Zoom on Camera Track (if supported by device)
+    // 1. Hardware Zoom on Camera Track
     if (streamRef.current && hasHardwareZoom) {
       const track = streamRef.current.getVideoTracks()[0];
       if (track) {
@@ -131,12 +181,12 @@ export function ReceiptOcrModal({
           });
           return;
         } catch (e) {
-          console.warn('Hardware zoom falhou, usando zoom digital:', e);
+          console.warn('Hardware zoom falhou:', e);
         }
       }
     }
 
-    // 2. Digital CSS Zoom fallback on video element
+    // 2. Digital CSS Zoom fallback
     if (videoRef.current) {
       videoRef.current.style.transform = targetZoom > 1 ? `scale(${targetZoom})` : 'none';
       videoRef.current.style.transformOrigin = 'center center';
@@ -166,7 +216,6 @@ export function ReceiptOcrModal({
     setFocusRing({ x, y });
     setTimeout(() => setFocusRing(null), 1200);
 
-    // If video was paused or waiting for gesture in Android WebView, play it now
     if (videoRef.current && videoRef.current.paused) {
       videoRef.current.play().catch(() => {});
     }
@@ -190,10 +239,18 @@ export function ReceiptOcrModal({
 
   const startCamera = async () => {
     setErrorMessage('');
+    stopScanningLoopRef.current = false;
     try {
       stopCamera();
+      stopScanningLoopRef.current = false;
 
-      // Flexible constraints with reliable progressive fallback
+      const hints = new Map<DecodeHintType, any>();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
+      hints.set(DecodeHintType.TRY_HARDER, true);
+
+      const reader = new BrowserMultiFormatReader(hints);
+      zxingReaderRef.current = reader;
+
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: { ideal: 'environment' },
@@ -218,7 +275,6 @@ export function ReceiptOcrModal({
       streamRef.current = stream;
       setIsCameraActive(true);
 
-      // Immediately connect stream to video element if already mounted
       if (videoRef.current) {
         const v = videoRef.current;
         v.muted = true;
@@ -227,33 +283,14 @@ export function ReceiptOcrModal({
         v.setAttribute('playsinline', 'true');
         v.setAttribute('webkit-playsinline', 'true');
         v.srcObject = stream;
-        v.play().catch(() => {});
+        await v.play().catch(() => {});
       }
 
-      // Check track capabilities (Torch, Hardware Zoom, Autofocus)
       const track = stream.getVideoTracks()[0];
       if (track) {
         const capabilities = (track.getCapabilities ? track.getCapabilities() : {}) as any;
-        if (capabilities.torch) {
-          setHasTorch(true);
-        } else {
-          setHasTorch(false);
-        }
-
-        if (capabilities.zoom) {
-          setHasHardwareZoom(true);
-          if (zoomLevel > 1) {
-            try {
-              await track.applyConstraints({
-                advanced: [{ zoom: zoomLevel } as any]
-              });
-            } catch {
-              // ignore
-            }
-          }
-        } else {
-          setHasHardwareZoom(false);
-        }
+        setHasTorch(Boolean(capabilities.torch));
+        setHasHardwareZoom(Boolean(capabilities.zoom));
 
         if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
           try {
@@ -265,122 +302,182 @@ export function ReceiptOcrModal({
           }
         }
       }
+
+      // Start continuous QR Code scan loop
+      startScanningLoop();
     } catch (err: any) {
       console.error(err);
       setIsCameraActive(false);
       setErrorMessage(
-        'Não foi possível abrir a câmera ao vivo. Você pode tirar uma foto com a câmera nativa do celular ou selecionar uma foto da galeria.'
+        'Não foi possível abrir a câmera ao vivo. Você pode selecionar uma foto do QR Code da galeria ou colar o link da SEFAZ.'
       );
     }
   };
 
-  // Ensure stream is attached to video element as soon as it mounts in DOM
-  useEffect(() => {
-    if (isCameraActive && videoRef.current && streamRef.current) {
-      const v = videoRef.current;
-      v.muted = true;
-      v.defaultMuted = true;
-      v.playsInline = true;
-      v.setAttribute('playsinline', 'true');
-      v.setAttribute('webkit-playsinline', 'true');
-      if (v.srcObject !== streamRef.current) {
-        v.srcObject = streamRef.current;
-      }
-      v.play().catch((e) => console.warn('Falha ao reproduzir stream:', e));
-    }
-  }, [isCameraActive]);
+  const startScanningLoop = () => {
+    let lastScanTime = 0;
 
-  const handleCapturePhoto = () => {
-    if (!videoRef.current) return;
-    try {
-      const video = videoRef.current;
-      const canvas = document.createElement('canvas');
-      const vWidth = video.videoWidth || 1920;
-      const vHeight = video.videoHeight || 1080;
+    const scanFrame = async (timestamp: number) => {
+      if (stopScanningLoopRef.current) return;
 
-      canvas.width = vWidth;
-      canvas.height = vHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        if (!hasHardwareZoom && zoomLevel > 1) {
-          // Crop digital zoom to match user's viewfinder preview
-          const sx = (vWidth * (1 - 1 / zoomLevel)) / 2;
-          const sy = (vHeight * (1 - 1 / zoomLevel)) / 2;
-          const sWidth = vWidth / zoomLevel;
-          const sHeight = vHeight / zoomLevel;
-          ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
-        } else {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      if (timestamp - lastScanTime > 150) {
+        lastScanTime = timestamp;
+
+        if (videoRef.current && videoRef.current.readyState >= 2 && zxingReaderRef.current) {
+          try {
+            // Check native BarcodeDetector first if available
+            if ('BarcodeDetector' in window) {
+              try {
+                const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+                const barcodes = await detector.detect(videoRef.current);
+                if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+                  const qrText = barcodes[0].rawValue.trim();
+                  handleQrCodeDetected(qrText);
+                  return;
+                }
+              } catch {
+                // fallback to ZXing
+              }
+            }
+
+            // ZXing decode
+            const result = zxingReaderRef.current.decode(videoRef.current);
+            if (result && result.getText()) {
+              const qrText = result.getText().trim();
+              handleQrCodeDetected(qrText);
+              return;
+            }
+          } catch {
+            // No barcode found in current frame, loop continues
+          }
         }
-
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-        stopCamera();
-        setImagePreview(dataUrl);
-        processReceiptImage(dataUrl);
       }
-    } catch (err: any) {
-      setErrorMessage('Erro ao capturar foto da câmera.');
-    }
+
+      if (!stopScanningLoopRef.current) {
+        animationFrameRef.current = requestAnimationFrame(scanFrame);
+      }
+    };
+
+    animationFrameRef.current = requestAnimationFrame(scanFrame);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleQrCodeDetected = async (qrText: string) => {
+    if (!qrText) return;
+    playBeep();
+    stopCamera();
+    setScannedUrl(qrText);
+    await processSefazQrCode(qrText);
+  };
+
+  // Handle Photo selection from Gallery
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      stopCamera();
-      setImagePreview(dataUrl);
-      processReceiptImage(dataUrl);
-    };
-    reader.onerror = () => {
+    setErrorMessage('');
+    setStep('processing');
+    setIsProcessing(true);
+    setProcessingStatus('Decodificando QR Code da imagem...');
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = reader.result as string;
+
+        try {
+          const hints = new Map<DecodeHintType, any>();
+          hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
+          hints.set(DecodeHintType.TRY_HARDER, true);
+          const zxing = new BrowserMultiFormatReader(hints);
+
+          const img = new Image();
+          img.onload = async () => {
+            try {
+              let qrCodeText = '';
+
+              // Native BarcodeDetector check
+              if ('BarcodeDetector' in window) {
+                try {
+                  const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+                  const codes = await detector.detect(img);
+                  if (codes && codes.length > 0 && codes[0].rawValue) {
+                    qrCodeText = codes[0].rawValue.trim();
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+
+              if (!qrCodeText) {
+                const result = await zxing.decodeFromImageElement(img);
+                qrCodeText = result.getText().trim();
+              }
+
+              if (!qrCodeText) {
+                throw new Error('Nenhum QR Code foi encontrado na imagem selecionada. Escolha uma foto nítida do QR Code do cupom.');
+              }
+
+              playBeep();
+              setScannedUrl(qrCodeText);
+              await processSefazQrCode(qrCodeText);
+            } catch (err: any) {
+              setErrorMessage('Não foi possível identificar o QR Code nesta foto. Certifique-se de que o QR Code está visível e bem enquadrado.');
+              setStep('capture');
+              setIsProcessing(false);
+            }
+          };
+          img.src = dataUrl;
+        } catch (err: any) {
+          setErrorMessage(err.message || 'Erro ao decodificar QR Code da imagem.');
+          setStep('capture');
+          setIsProcessing(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
       setErrorMessage('Erro ao ler arquivo da imagem.');
-    };
-    reader.readAsDataURL(file);
+      setStep('capture');
+      setIsProcessing(false);
+    }
     e.target.value = '';
   };
 
-  const processReceiptImage = async (dataUrl: string) => {
+  // Process SEFAZ NFC-e QR Code via backend proxy & Gemini parser
+  const processSefazQrCode = async (qrCodeUrlOrKey: string) => {
     setStep('processing');
     setIsProcessing(true);
     setErrorMessage('');
+    setProcessingStatus('Consultando Portal da SEFAZ e extraindo produtos...');
 
     try {
-      const response = await fetch(getApiUrl('/api/gemini/receipt-ocr'), {
+      const response = await fetch(getApiUrl('/api/sefaz/parse-qrcode'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageBase64: dataUrl,
-          mimeType: 'image/jpeg'
+          qrCodeUrl: qrCodeUrlOrKey,
+          rawText: qrCodeUrlOrKey
         })
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Erro ao processar cupom fiscal com IA.');
+        throw new Error(errorData.error || 'Erro ao consultar a SEFAZ.');
       }
 
-      const responseText = await response.text();
-      let result: any;
-      try {
-        result = JSON.parse(responseText);
-      } catch {
-        throw new Error('Falha ao comunicar com o servidor de IA. Verifique sua conexão com a internet.');
-      }
+      const result = await response.json();
 
       if (!result.items || !Array.isArray(result.items) || result.items.length === 0) {
-        throw new Error('Nenhum item de compra foi reconhecido na imagem do cupom. Tente uma foto mais nítida e bem iluminada.');
+        throw new Error('Nenhum item de compra foi encontrado nesta consulta da SEFAZ. Verifique se o QR Code é de uma NFC-e válida.');
       }
 
       const mappedItems: OcrExtractedItem[] = result.items.map((it: any, idx: number) => ({
-        id: `ocr_${Date.now()}_${idx}`,
+        id: `sefaz_${Date.now()}_${idx}`,
         name: it.name || 'Produto sem nome',
         quantity: Number(it.quantity) > 0 ? Number(it.quantity) : 1,
-        unit: normalizeProductUnit(it.unit || 'Un'),
+        unit: normalizeProductUnit(it.unit || 'Unidade'),
         unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0,
         totalPrice: Number(it.totalPrice) >= 0 ? Number(it.totalPrice) : (Number(it.quantity) * Number(it.unitPrice)),
-        category: it.category || 'Mercearia',
+        category: it.category || categories[0]?.name || 'Mercearia',
         brand: normalizeBrand(it.brand),
         barcode: it.barcode || '',
         selected: true
@@ -398,7 +495,7 @@ export function ReceiptOcrModal({
       setStep('review');
     } catch (err: any) {
       console.error(err);
-      setErrorMessage(err.message || 'Falha no processamento óptico do cupom fiscal.');
+      setErrorMessage(err.message || 'Falha ao processar o QR Code na SEFAZ.');
       setStep('capture');
     } finally {
       setIsProcessing(false);
@@ -426,10 +523,10 @@ export function ReceiptOcrModal({
 
   const handleAddItem = () => {
     const newItem: OcrExtractedItem = {
-      id: `ocr_manual_${Date.now()}`,
+      id: `sefaz_manual_${Date.now()}`,
       name: '',
       quantity: 1,
-      unit: 'Un',
+      unit: 'Unidade',
       unitPrice: 0,
       totalPrice: 0,
       category: categories[0]?.name || 'Mercearia',
@@ -484,19 +581,19 @@ export function ReceiptOcrModal({
         <div className="p-4 sm:p-5 border-b border-neutral-100 flex items-center justify-between bg-white shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-2xl">
-              <Receipt size={22} />
+              <QrCode size={22} />
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-black text-neutral-900 flex items-center gap-2">
-                Leitor OCR de Cupom Fiscal
-                <span className="text-[10px] font-bold bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  IA Gemini
+                Leitor de Cupom Fiscal (QR Code SEFAZ)
+                <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  NFC-e
                 </span>
               </h2>
               <p className="text-xs text-neutral-500">
                 {activePurchaseId
-                  ? `Importar itens diretamente para a compra "${activePurchaseName}"`
-                  : 'Fotografe o cupom ou nota fiscal para criar uma lista automática com todos os itens'}
+                  ? `Importar produtos diretamente para a compra "${activePurchaseName}"`
+                  : 'Escaneie o QR Code do cupom ou envie uma foto para carregar os produtos direto da SEFAZ'}
               </p>
             </div>
           </div>
@@ -518,11 +615,63 @@ export function ReceiptOcrModal({
           </div>
         )}
 
-        {/* STEP 1: CAPTURE PHOTO OR SELECT FILE */}
+        {/* STEP 1: CAPTURE QR CODE (Camera, Gallery or Manual Link) */}
         {step === 'capture' && (
-          <div className="p-4 sm:p-6 overflow-y-auto space-y-5">
-            {/* Live Camera View */}
-            {isCameraActive ? (
+          <div className="p-4 sm:p-6 overflow-y-auto space-y-4">
+            {/* Tabs Selector: Câmera QR Code, Galeria, Colar Link */}
+            <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-2xl border border-neutral-200/80">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('camera');
+                  startCamera();
+                }}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  activeTab === 'camera'
+                    ? 'bg-white text-emerald-700 shadow-xs'
+                    : 'text-neutral-500 hover:text-neutral-800'
+                }`}
+              >
+                <Camera size={15} />
+                <span>Câmera ao Vivo</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('gallery');
+                  stopCamera();
+                  fileInputRef.current?.click();
+                }}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  activeTab === 'gallery'
+                    ? 'bg-white text-emerald-700 shadow-xs'
+                    : 'text-neutral-500 hover:text-neutral-800'
+                }`}
+              >
+                <ImageIcon size={15} />
+                <span>Foto da Galeria</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('manual');
+                  stopCamera();
+                }}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  activeTab === 'manual'
+                    ? 'bg-white text-emerald-700 shadow-xs'
+                    : 'text-neutral-500 hover:text-neutral-800'
+                }`}
+              >
+                <LinkIcon size={15} />
+                <span>Colar Link SEFAZ</span>
+              </button>
+            </div>
+
+            {/* TAB 1: Live Camera QR Code Scanner */}
+            {activeTab === 'camera' && (
               <div className="space-y-3">
                 <div 
                   onClick={handleTapToFocus}
@@ -551,12 +700,12 @@ export function ReceiptOcrModal({
                   {/* Tap to Focus Ring Animation */}
                   {focusRing && (
                     <div 
-                      className="absolute pointer-events-none w-14 h-14 -translate-x-1/2 -translate-y-1/2 border-2 border-amber-400 rounded-full animate-ping z-20"
+                      className="absolute pointer-events-none w-14 h-14 -translate-x-1/2 -translate-y-1/2 border-2 border-emerald-400 rounded-full animate-ping z-20"
                       style={{ left: focusRing.x, top: focusRing.y }}
                     />
                   )}
 
-                  {/* Top Floating Controls: Zoom Selector & Torch */}
+                  {/* Top Floating Controls: Zoom & Torch */}
                   <div className="absolute top-3 inset-x-3 z-10 flex items-center justify-between pointer-events-auto">
                     {/* Zoom Selector */}
                     <div className="flex items-center gap-1 bg-black/65 backdrop-blur-md p-1 rounded-2xl border border-white/15 shadow-lg">
@@ -571,7 +720,7 @@ export function ReceiptOcrModal({
                             e.stopPropagation();
                             handleZoomChange(z);
                           }}
-                          className={`px-2.5 py-1 rounded-xl text-xs font-black transition-all ${
+                          className={`px-2.5 py-1 rounded-xl text-xs font-black transition-all cursor-pointer ${
                             zoomLevel === z
                               ? 'bg-emerald-500 text-white shadow-md scale-105'
                               : 'text-white/80 hover:text-white hover:bg-white/10'
@@ -590,7 +739,7 @@ export function ReceiptOcrModal({
                           e.stopPropagation();
                           toggleTorch();
                         }}
-                        className={`p-2.5 rounded-2xl transition-all shadow-md ${
+                        className={`p-2.5 rounded-2xl transition-all shadow-md cursor-pointer ${
                           torchOn
                             ? 'bg-amber-400 text-neutral-900 shadow-amber-400/50 scale-105'
                             : 'bg-black/65 backdrop-blur-md text-white border border-white/15 hover:bg-black/80'
@@ -602,140 +751,104 @@ export function ReceiptOcrModal({
                     )}
                   </div>
 
-                  {/* Clean Camera Guide Frame (unobstructed, no overlapping text badges) */}
-                  <div className="absolute inset-3 border-2 border-dashed border-white/35 rounded-2xl pointer-events-none" />
+                  {/* QR Code Targeting Frame with Glowing Corners */}
+                  <div className="absolute w-56 h-56 sm:w-64 sm:h-64 pointer-events-none flex items-center justify-center">
+                    {/* Viewfinder Corners */}
+                    <div className="absolute inset-0 border-2 border-dashed border-emerald-400/70 rounded-3xl" />
+                    <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-emerald-400 rounded-tl-2xl" />
+                    <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-emerald-400 rounded-tr-2xl" />
+                    <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-emerald-400 rounded-bl-2xl" />
+                    <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-emerald-400 rounded-br-2xl" />
 
-                  {/* Capture Floating Action Bar */}
-                  <div className="absolute bottom-4 inset-x-4 flex items-center justify-between gap-3 pointer-events-auto z-10">
-                    <button
-                      type="button"
-                      onClick={stopCamera}
-                      className="px-4 py-2 bg-neutral-900/80 backdrop-blur-xs text-white rounded-xl text-xs font-bold hover:bg-neutral-900 transition-all border border-white/10"
-                    >
-                      Fechar Câmera
-                    </button>
+                    {/* Animated Scanning Laser Line */}
+                    <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_#34d399] animate-pulse" />
+                  </div>
 
-                    <button
-                      type="button"
-                      onClick={handleCapturePhoto}
-                      className="h-14 w-14 rounded-full bg-white text-emerald-600 shadow-xl flex items-center justify-center border-4 border-emerald-500 hover:scale-105 active:scale-95 transition-all"
-                      title="Fotografar Cupom"
-                    >
-                      <Camera size={26} />
-                    </button>
-
-                    <div className="w-20" />
+                  {/* Bottom Guide Text Banner */}
+                  <div className="absolute bottom-3 inset-x-3 pointer-events-none text-center">
+                    <span className="inline-block bg-black/70 backdrop-blur-md px-3.5 py-1.5 rounded-full text-[11px] font-bold text-white/90 shadow-md">
+                      Aponte a câmera para o QR Code impresso no cupom fiscal
+                    </span>
                   </div>
                 </div>
 
-                {/* Macro Focus Guidance Note */}
-                <div className="p-3 bg-emerald-50/80 border border-emerald-200/80 rounded-2xl text-xs text-emerald-950 flex items-start gap-2.5">
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-950 flex items-start gap-2.5">
                   <Info size={16} className="text-emerald-600 shrink-0 mt-0.5" />
-                  <div className="space-y-0.5 leading-relaxed text-justify">
-                    <p className="text-[11px] font-bold text-emerald-900">
-                      💡 Dica de Foco & Macro para Cupons Fiscais:
-                    </p>
-                    <p className="text-[11px] text-emerald-800">
-                      As letras miúdas de notas fiscais costumam borrar se a lente aproximar demais. <strong>Mantenha o celular afastado (20 a 35 cm)</strong> e toque no botão <strong>1.5x</strong> ou <strong>2x</strong> acima. A imagem capturada será nítida e a leitura dos preços e produtos será imediata!
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                {/* Option 1: Live Camera with Zoom */}
-                <div className="p-5 rounded-3xl bg-neutral-50 border-2 border-dashed border-neutral-200 hover:border-emerald-500 text-center flex flex-col items-center justify-between gap-3 transition-all group">
-                  <div className="p-3.5 bg-emerald-100 text-emerald-700 rounded-2xl group-hover:scale-110 transition-transform">
-                    <Camera size={28} />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-sm text-neutral-900">Câmera ao Vivo</h3>
-                    <p className="text-[11px] text-neutral-500 mt-1">
-                      Visor interativo com zoom 1.5x / 2x, foco por toque e lanterna.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={startCamera}
-                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5"
-                  >
-                    <Camera size={14} />
-                    <span>Abrir Câmera</span>
-                  </button>
-                </div>
-
-                {/* Option 2: Native Smartphone Camera (Full HD / 4K) */}
-                <div className="p-5 rounded-3xl bg-neutral-50 border-2 border-dashed border-neutral-200 hover:border-purple-500 text-center flex flex-col items-center justify-between gap-3 transition-all group">
-                  <div className="p-3.5 bg-purple-100 text-purple-700 rounded-2xl group-hover:scale-110 transition-transform">
-                    <Smartphone size={28} />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-sm text-neutral-900">Câmera do Celular</h3>
-                    <p className="text-[11px] text-neutral-500 mt-1">
-                      Usa o app nativo do seu aparelho com alta resolução e foco automático.
-                    </p>
-                  </div>
-                  <input
-                    ref={cameraCaptureInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => cameraCaptureInputRef.current?.click()}
-                    className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 active:scale-95 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5"
-                  >
-                    <Smartphone size={14} />
-                    <span>Tirar Foto HD</span>
-                  </button>
-                </div>
-
-                {/* Option 3: Upload from Gallery / Files */}
-                <div className="p-5 rounded-3xl bg-neutral-50 border-2 border-dashed border-neutral-200 hover:border-sky-500 text-center flex flex-col items-center justify-between gap-3 transition-all group">
-                  <div className="p-3.5 bg-sky-100 text-sky-700 rounded-2xl group-hover:scale-110 transition-transform">
-                    <ImageIcon size={28} />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-sm text-neutral-900">Galeria de Fotos</h3>
-                    <p className="text-[11px] text-neutral-500 mt-1">
-                      Envie uma foto ou comprovante já salvo no seu aparelho.
-                    </p>
-                  </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full py-2.5 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center justify-center gap-1.5"
-                  >
-                    <ImageIcon size={14} />
-                    <span>Abrir Galeria</span>
-                  </button>
+                  <p className="text-[11px] text-emerald-900 leading-relaxed text-justify">
+                    <strong>Leitura Automática por QR Code:</strong> Todos os cupons fiscais impressos (NFC-e) trazem um QR Code que direciona para a página oficial da SEFAZ. Ao enquadrar o código, o app busca automaticamente a lista completa de produtos e preços na base fiscal do seu estado.
+                  </p>
                 </div>
               </div>
             )}
 
-            {/* Practical Tips */}
-            <div className="p-4 bg-neutral-50 rounded-2xl border border-neutral-200 text-xs text-neutral-600 space-y-2">
-              <span className="font-bold text-neutral-900 flex items-center gap-1.5">
-                <HelpCircle size={15} className="text-sky-500" />
-                Dicas para leitura 100% precisa:
-              </span>
-              <ul className="list-disc pl-5 space-y-1 text-[11px] text-neutral-500 leading-relaxed">
-                <li>Fotografe o cupom esticado sobre uma mesa com boa iluminação.</li>
-                <li>Certifique-se de que a coluna de <strong>quantidade</strong> e <strong>preço unitário</strong> está visível.</li>
-                <li>Se o cupom for muito longo, fotografe em partes ou enquadre a seção principal dos produtos.</li>
-                <li>A IA Gemini decodifica abreviações de supermercado automaticamente (ex: "ACUCAR CRIST 1KG" virará "Açúcar Cristal 1kg").</li>
-              </ul>
-            </div>
+            {/* TAB 2: Gallery Photo Picker */}
+            {activeTab === 'gallery' && (
+              <div className="p-6 sm:p-8 rounded-3xl bg-neutral-50 border-2 border-dashed border-emerald-300 text-center flex flex-col items-center justify-center gap-4">
+                <div className="p-4 bg-emerald-100 text-emerald-700 rounded-3xl shadow-xs">
+                  <ImageIcon size={36} />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-neutral-900">Selecionar Foto do QR Code</h3>
+                  <p className="text-xs text-neutral-500 max-w-sm mt-1">
+                    Se você tirou uma foto do QR Code da sua nota ou recebeu pelo WhatsApp, selecione a imagem da galeria.
+                  </p>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-2xl text-xs font-black shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <ImageIcon size={16} />
+                  <span>Escolher Imagem da Galeria</span>
+                </button>
+              </div>
+            )}
+
+            {/* TAB 3: Manual Link or Key */}
+            {activeTab === 'manual' && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (manualQrUrl.trim()) {
+                    processSefazQrCode(manualQrUrl.trim());
+                  }
+                }}
+                className="p-5 bg-neutral-50 rounded-3xl border border-neutral-200 space-y-4"
+              >
+                <div>
+                  <label className="block text-xs font-bold text-neutral-700 mb-1">
+                    Link da SEFAZ ou Conteúdo do QR Code
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Cole aqui o link do QR Code (ex: http://www.fazenda...)"
+                    value={manualQrUrl}
+                    onChange={(e) => setManualQrUrl(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <p className="text-[11px] text-neutral-400 mt-1">
+                    Você pode colar o link do QR Code copiado do leitor ou da chave de acesso da nota.
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={!manualQrUrl.trim()}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black shadow-xs transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Sparkles size={15} />
+                  <span>Consultar na SEFAZ</span>
+                </button>
+              </form>
+            )}
           </div>
         )}
 
@@ -744,25 +857,25 @@ export function ReceiptOcrModal({
           <div className="p-8 sm:p-12 flex flex-col items-center justify-center text-center space-y-5 my-auto">
             <div className="relative">
               <div className="h-20 w-20 rounded-3xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 shadow-sm animate-pulse">
-                <Receipt size={36} />
+                <QrCode size={38} />
               </div>
-              <div className="absolute -top-2 -right-2 p-1.5 bg-sky-500 text-white rounded-full animate-spin">
+              <div className="absolute -top-2 -right-2 p-1.5 bg-emerald-600 text-white rounded-full animate-spin shadow-md">
                 <RefreshCw size={14} />
               </div>
             </div>
 
-            <div className="space-y-1 max-w-sm">
+            <div className="space-y-1.5 max-w-md">
               <h3 className="font-black text-base text-neutral-900">
-                Processando Cupom Fiscal com IA...
+                {processingStatus}
               </h3>
               <p className="text-xs text-neutral-500 leading-relaxed">
-                A inteligência artificial está lendo as linhas do recibo, identificando o supermercado, produtos, quantidades e preços pagos.
+                Acessando a base da SEFAZ, decodificando a lista oficial de produtos, quantidades e preços unitários da nota fiscal.
               </p>
             </div>
 
-            {imagePreview && (
-              <div className="h-28 w-28 rounded-2xl overflow-hidden border border-neutral-200 shadow-xs opacity-75">
-                <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+            {scannedUrl && (
+              <div className="p-2.5 bg-neutral-100 rounded-xl max-w-sm w-full truncate text-[10px] text-neutral-600 font-mono border border-neutral-200">
+                {scannedUrl}
               </div>
             )}
           </div>
@@ -775,7 +888,7 @@ export function ReceiptOcrModal({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-neutral-50 rounded-2xl border border-neutral-200">
               <div>
                 <label className="block text-[10px] font-black uppercase text-neutral-400 mb-1">
-                  Nome do estabelecimento
+                  Estabelecimento (SEFAZ)
                 </label>
                 <div className="relative">
                   <Store size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
@@ -785,14 +898,14 @@ export function ReceiptOcrModal({
                     value={extractedMarket}
                     onChange={(e) => setExtractedMarket(sanitizeAndCapitalize(e.target.value, 40))}
                     placeholder="Ex: Pão de Açúcar, Assaí"
-                    className="w-full pl-9 pr-3 py-1.5 text-base sm:text-xs bg-white border border-neutral-200 rounded-xl text-neutral-900 font-bold focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    className="w-full pl-9 pr-3 py-1.5 text-base sm:text-xs bg-white border border-neutral-200 rounded-xl text-neutral-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
               </div>
 
               <div>
                 <label className="block text-[10px] font-black uppercase text-neutral-400 mb-1">
-                  Data da Compra
+                  Data de Emissão
                 </label>
                 <div className="relative">
                   <Calendar size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
@@ -800,20 +913,20 @@ export function ReceiptOcrModal({
                     type="date"
                     value={extractedDate}
                     onChange={(e) => setExtractedDate(e.target.value)}
-                    className="w-full pl-9 pr-3 py-1.5 text-base sm:text-xs bg-white border border-neutral-200 rounded-xl text-neutral-900 font-bold focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    className="w-full pl-9 pr-3 py-1.5 text-base sm:text-xs bg-white border border-neutral-200 rounded-xl text-neutral-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
               </div>
 
               <div>
                 <label className="block text-[10px] font-black uppercase text-neutral-400 mb-1">
-                  Total Registrado no Cupom
+                  Total da Nota Fiscal
                 </label>
                 <div className="flex items-center gap-2">
                   <span className="text-base font-black text-emerald-700">
                     {extractedTotal !== undefined ? formatCurrency(extractedTotal) : 'Não indicado'}
                   </span>
-                  {extractedDiscount && extractedDiscount > 0 && (
+                  {extractedDiscount !== undefined && extractedDiscount > 0 && (
                     <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
                       Desconto: -{formatCurrency(extractedDiscount)}
                     </span>
@@ -825,15 +938,15 @@ export function ReceiptOcrModal({
             {!activePurchaseId && (
               <div>
                 <label className="block text-xs font-bold text-neutral-600 mb-1">
-                  Título para esta Nova Compra
+                  Título para esta Nova Lista de Compras
                 </label>
                 <input
                   type="text"
                   maxLength={40}
                   value={purchaseTitle}
                   onChange={(e) => setPurchaseTitle(sanitizeAndCapitalize(e.target.value, 40))}
-                  placeholder="Ex: Compra Mensal - Mercado Central"
-                  className="w-full px-3 py-2 text-base sm:text-xs bg-white border border-neutral-200 rounded-xl text-neutral-900 font-bold focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  placeholder="Ex: Compra Carrefour - 25/09"
+                  className="w-full px-3 py-2 text-base sm:text-xs bg-white border border-neutral-200 rounded-xl text-neutral-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
             )}
@@ -842,8 +955,9 @@ export function ReceiptOcrModal({
             <div className="space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
-                  <h4 className="font-black text-sm text-neutral-900">
-                    Itens Identificados ({selectedItems.length} de {extractedItems.length} selecionados)
+                  <h4 className="font-black text-sm text-neutral-900 flex items-center gap-1.5">
+                    <CheckCheck size={16} className="text-emerald-600" />
+                    Itens da SEFAZ ({selectedItems.length} de {extractedItems.length} selecionados)
                   </h4>
                 </div>
 
@@ -854,7 +968,7 @@ export function ReceiptOcrModal({
                       const allSelected = extractedItems.every(i => i.selected);
                       setExtractedItems(prev => prev.map(i => ({ ...i, selected: !allSelected })));
                     }}
-                    className="text-xs font-bold text-sky-600 hover:underline"
+                    className="text-xs font-bold text-emerald-600 hover:underline cursor-pointer"
                   >
                     {extractedItems.every(i => i.selected) ? 'Desmarcar Todos' : 'Marcar Todos'}
                   </button>
@@ -862,7 +976,7 @@ export function ReceiptOcrModal({
                   <button
                     type="button"
                     onClick={handleAddItem}
-                    className="px-3 py-1 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1"
+                    className="px-3 py-1 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
                   >
                     <Plus size={13} />
                     <span>Adicionar Linha</span>
@@ -896,7 +1010,7 @@ export function ReceiptOcrModal({
                         value={item.name}
                         onChange={(e) => handleUpdateItem(item.id, 'name', sanitizeAndCapitalize(e.target.value, 40))}
                         placeholder="Nome do produto"
-                        className="w-full px-2 py-1 text-base sm:text-xs font-bold bg-white border border-neutral-200 rounded-lg text-neutral-900 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                        className="w-full px-2 py-1 text-base sm:text-xs font-bold bg-white border border-neutral-200 rounded-lg text-neutral-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                       />
                       <div className="flex items-center gap-2 mt-1">
                         <input
@@ -927,14 +1041,14 @@ export function ReceiptOcrModal({
                         <input
                           type="number"
                           step="any"
-                          min="0.01"
+                          min="0.001"
                           value={item.quantity}
                           onChange={(e) => handleUpdateItem(item.id, 'quantity', parseFloat(e.target.value) || 0)}
                           className="w-full px-2 py-1 text-base sm:text-xs font-bold bg-white border border-neutral-200 rounded-lg text-neutral-900 focus:outline-none"
                         />
                       </div>
 
-                      <div className="w-16">
+                      <div className="w-20">
                         <label className="block text-[9px] uppercase font-bold text-neutral-400">Unid</label>
                         <select
                           value={normalizeProductUnit(item.unit)}
@@ -969,7 +1083,7 @@ export function ReceiptOcrModal({
                       <button
                         type="button"
                         onClick={() => handleRemoveItem(item.id)}
-                        className="p-1.5 text-neutral-400 hover:text-red-600 rounded-lg transition-colors ml-1"
+                        className="p-1.5 text-neutral-400 hover:text-red-600 rounded-lg transition-colors ml-1 cursor-pointer"
                         title="Remover Item"
                       >
                         <Trash2 size={15} />
@@ -997,17 +1111,20 @@ export function ReceiptOcrModal({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setStep('capture')}
-                  className="flex-1 sm:flex-none px-4 py-2.5 text-xs font-bold text-neutral-600 hover:bg-neutral-100 rounded-xl transition-all"
+                  onClick={() => {
+                    setStep('capture');
+                    startCamera();
+                  }}
+                  className="flex-1 sm:flex-none px-4 py-2.5 text-xs font-bold text-neutral-600 hover:bg-neutral-100 rounded-xl transition-all cursor-pointer"
                 >
-                  Fotografar Outro
+                  Escanear Outro
                 </button>
 
                 <button
                   type="button"
                   onClick={handleConfirm}
                   disabled={isProcessing || selectedItems.length === 0}
-                  className="flex-1 sm:flex-none px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center justify-center gap-2"
+                  className="flex-1 sm:flex-none px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {isProcessing ? (
                     <>
@@ -1032,7 +1149,7 @@ export function ReceiptOcrModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-5 py-2.5 text-xs font-bold text-neutral-600 hover:bg-neutral-100 rounded-xl transition-all"
+                className="px-5 py-2.5 text-xs font-bold text-neutral-600 hover:bg-neutral-100 rounded-xl transition-all cursor-pointer"
               >
                 Cancelar
               </button>

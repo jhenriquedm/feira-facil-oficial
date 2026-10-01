@@ -14,14 +14,25 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.4.8',
-  buildNumber: 58,
-  releaseDate: '2026-09-25',
+  version: '1.4.9',
+  buildNumber: 59,
+  releaseDate: '2026-10-01',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.4.9',
+      date: '2026-10-01',
+      highlights: [
+        'Leitor exclusivo de QR Code de Cupom Fiscal (SEFAZ / NFC-e) direto pela câmera em tempo real ou por foto na galeria',
+        'Extração automática dos produtos, valores e dados da compra via integração do portal SEFAZ',
+        'Funcionalidade para excluir todos os itens de uma lista de compras de uma só vez com confirmação de segurança',
+        'Preservação integral do catálogo de produtos cadastrados durante a limpeza da lista de compras',
+        'Sanitização numérica e bloqueio de caracteres especiais em campos de quantidade e peso'
+      ]
+    },
     {
       version: '1.4.8',
       date: '2026-09-25',

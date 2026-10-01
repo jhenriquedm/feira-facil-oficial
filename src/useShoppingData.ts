@@ -2952,6 +2952,64 @@ export function useShoppingData() {
     }
   };
 
+  const deleteAllPurchaseItems = async (purchaseId: string) => {
+    const list = purchaseItems[purchaseId] || [];
+    if (list.length === 0) return;
+
+    const uid = user ? user.uid : 'guest';
+    const updatedItems = { ...purchaseItems, [purchaseId]: [] };
+    setPurchaseItems(updatedItems);
+    if (user) saveUserData('purchase_items', updatedItems, user.uid);
+
+    const updatedPurchases = purchases.map(pur => pur.id === purchaseId ? {
+      ...pur,
+      total: 0,
+      updatedAt: new Date().toISOString()
+    } : pur);
+    setPurchases(updatedPurchases);
+    if (user) saveUserData('purchases', updatedPurchases, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        const itemsSnap = await getDocs(collection(db, 'users', uid, 'purchases', purchaseId, 'items'));
+        const batch = writeBatch(db);
+        itemsSnap.forEach(itemDoc => {
+          batch.delete(itemDoc.ref);
+        });
+        batch.update(doc(db, 'users', uid, 'purchases', purchaseId), {
+          total: 0,
+          updatedAt: new Date().toISOString()
+        });
+        await batch.commit();
+      } catch (err) {
+        console.warn("Direct Firestore deleteAllPurchaseItems failed, queueing for sync:", err);
+        list.forEach(item => {
+          enqueueSyncOperation(uid, {
+            type: 'delete',
+            path: `users/${uid}/purchases/${purchaseId}/items/${item.id}`
+          });
+        });
+        enqueueSyncOperation(uid, {
+          type: 'update',
+          path: `users/${uid}/purchases/${purchaseId}`,
+          data: { total: 0, updatedAt: new Date().toISOString() }
+        });
+      }
+    } else if (user && uid !== 'guest') {
+      list.forEach(item => {
+        enqueueSyncOperation(uid, {
+          type: 'delete',
+          path: `users/${uid}/purchases/${purchaseId}/items/${item.id}`
+        });
+      });
+      enqueueSyncOperation(uid, {
+        type: 'update',
+        path: `users/${uid}/purchases/${purchaseId}`,
+        data: { total: 0, updatedAt: new Date().toISOString() }
+      });
+    }
+  };
+
   const toggleItemChecked = async (purchaseId: string, itemId: string, isChecked: boolean) => {
     await updatePurchaseItem(purchaseId, itemId, { isChecked });
   };
@@ -3106,6 +3164,7 @@ export function useShoppingData() {
     addPurchaseItem,
     updatePurchaseItem,
     deletePurchaseItem,
+    deleteAllPurchaseItems,
     toggleItemChecked,
     toggleAllItemsChecked,
     completePurchase,

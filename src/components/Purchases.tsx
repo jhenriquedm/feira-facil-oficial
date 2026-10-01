@@ -4,7 +4,7 @@ import {
   Trash2, Edit3, Check, X, Search, DollarSign, Filter, Sparkles, AlertCircle, RefreshCw, Barcode as BarcodeIcon,
   Copy, PlusCircle, MinusCircle, Layers, CheckCircle2,
   ArrowUpDown, CheckCheck, TrendingDown, TrendingUp, Receipt, MoreVertical, PackagePlus,
-  CheckSquare, FileText
+  CheckSquare, FileText, QrCode
 } from 'lucide-react';
 import { Purchase, PurchaseType, PurchaseItem, Product, Category, PURCHASE_TYPE_LABELS } from '../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
@@ -34,6 +34,7 @@ interface PurchasesProps {
   addPurchaseItem: (purchaseId: string, item: Omit<PurchaseItem, 'id' | 'purchaseId' | 'isChecked'>) => Promise<void>;
   updatePurchaseItem: (purchaseId: string, itemId: string, data: Partial<PurchaseItem>) => Promise<void>;
   deletePurchaseItem: (purchaseId: string, itemId: string) => Promise<void>;
+  deleteAllPurchaseItems?: (purchaseId: string) => Promise<void>;
   toggleItemChecked: (purchaseId: string, itemId: string, isChecked: boolean) => Promise<void>;
   toggleAllItemsChecked?: (purchaseId: string, isChecked: boolean) => Promise<void>;
   completePurchase: (purchaseId: string) => Promise<void>;
@@ -57,6 +58,7 @@ export function Purchases({
   addPurchaseItem,
   updatePurchaseItem,
   deletePurchaseItem,
+  deleteAllPurchaseItems,
   toggleItemChecked,
   toggleAllItemsChecked,
   completePurchase,
@@ -374,6 +376,8 @@ export function Purchases({
   // Safe UI deletion modals & feedback (replaces blocking window.confirm/alert)
   const [purchaseToDelete, setPurchaseToDelete] = useState<Purchase | null>(null);
   const [itemToDelete, setItemToDelete] = useState<PurchaseItem | null>(null);
+  const [showClearAllItemsModal, setShowClearAllItemsModal] = useState(false);
+  const [isClearingAllItems, setIsClearingAllItems] = useState(false);
   const [inlineEditError, setInlineEditError] = useState<string | null>(null);
 
   // Editing single item inline state
@@ -944,10 +948,11 @@ export function Purchases({
                   setOcrTargetMode('newPurchase');
                   setIsReceiptOcrOpen(true);
                 }}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-all"
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-all cursor-pointer"
+                title="Ler QR Code da nota fiscal e importar produtos da SEFAZ"
               >
-                <Receipt size={17} />
-                <span>Escanear Cupom Fiscal (OCR)</span>
+                <QrCode size={17} />
+                <span>QR Code Cupom Fiscal (SEFAZ)</span>
               </button>
 
               <button
@@ -1422,6 +1427,19 @@ export function Purchases({
                         <span>Duplicar</span>
                       </button>
                     )}
+                    {activeItems.length > 0 && activePurchase.status === 'inProgress' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsKebabOpen(false);
+                          setShowClearAllItemsModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-xs font-bold text-red-600 hover:bg-red-50 flex items-center gap-2 border-t border-neutral-100"
+                      >
+                        <Trash2 size={15} className="text-red-500" />
+                        <span>Excluir todos os itens</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1492,13 +1510,25 @@ export function Purchases({
                 </div>
               )}
 
-              {/* Bottom Actions inside Card: Marcar todos e Finalizar compra side-by-side */}
+              {/* Bottom Actions inside Card: Marcar todos, Limpar lista e Finalizar compra side-by-side */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-3 border-t border-neutral-100 w-full">
+                {activeItems.length > 0 && activePurchase.status === 'inProgress' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowClearAllItemsModal(true)}
+                    className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200/80 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                    title="Excluir todos os itens desta lista de compras"
+                  >
+                    <Trash2 size={14} className="text-red-500" />
+                    <span>Limpar Lista</span>
+                  </button>
+                )}
+
                 {toggleAllItemsChecked && activeItems.length > 0 && activePurchase.status === 'inProgress' && (
                   <button
                     type="button"
                     onClick={() => toggleAllItemsChecked(activePurchase.id, itemsInCart.length !== activeItems.length)}
-                    className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-xl text-xs font-bold transition-all active:scale-95"
+                    className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
                     title={itemsInCart.length === activeItems.length ? "Desmarcar todos os itens" : "Marcar todos os itens no carrinho"}
                   >
                     <CheckCheck size={15} className={itemsInCart.length === activeItems.length ? "text-emerald-500" : "text-neutral-400"} />
@@ -1681,11 +1711,11 @@ export function Purchases({
                     setOcrTargetMode('activePurchase');
                     setIsReceiptOcrOpen(true);
                   }}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold transition-all border border-emerald-200"
-                  title="Importar produtos a partir de foto do cupom fiscal"
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold transition-all border border-emerald-200 cursor-pointer"
+                  title="Importar produtos lendo o QR Code do cupom fiscal da SEFAZ"
                 >
-                  <Receipt size={15} className="text-emerald-600" />
-                  <span>Ler Cupom Fiscal</span>
+                  <QrCode size={15} className="text-emerald-600" />
+                  <span>QR Code Cupom (SEFAZ)</span>
                 </button>
               </div>
             </div>
@@ -2349,6 +2379,77 @@ export function Purchases({
         </div>
       )}
 
+      {/* Safe Clear All Items Confirmation Modal */}
+      {showClearAllItemsModal && activePurchase && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto overscroll-contain animate-in fade-in">
+          <div className="bg-white max-w-md w-full rounded-3xl p-5 sm:p-6 border border-red-200 shadow-2xl space-y-4 my-auto max-h-[90dvh] overflow-y-auto pb-12 sm:pb-6">
+            <div className="flex items-center gap-3.5 text-red-600">
+              <div className="p-3 bg-red-100 text-red-600 rounded-2xl shrink-0">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-neutral-950">Excluir todos os itens?</h3>
+                <p className="text-xs text-neutral-500 font-semibold">{activePurchase.name}</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-neutral-50 rounded-2xl border border-neutral-200/80 space-y-2 text-xs text-neutral-600">
+              <p className="leading-relaxed">
+                Tem certeza de que deseja excluir todos os <strong>{activeItems.length} {activeItems.length === 1 ? 'item' : 'itens'}</strong> desta lista de compras?
+              </p>
+              <p className="text-[11px] text-neutral-500 pt-2 border-t border-neutral-200/60 leading-normal">
+                💡 <strong>Seus produtos estão seguros:</strong> Esta ação limpa apenas a lista desta compra. Todos os produtos continuarão cadastrados normalmente no catálogo.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={isClearingAllItems}
+                onClick={() => setShowClearAllItemsModal(false)}
+                className="px-4 py-2 text-xs font-bold text-neutral-600 hover:bg-neutral-100 rounded-xl transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isClearingAllItems}
+                onClick={async () => {
+                  setIsClearingAllItems(true);
+                  try {
+                    if (deleteAllPurchaseItems) {
+                      await deleteAllPurchaseItems(activePurchase.id);
+                    } else {
+                      for (const item of activeItems) {
+                        await deletePurchaseItem(activePurchase.id, item.id);
+                      }
+                    }
+                    setShowClearAllItemsModal(false);
+                  } catch (err: any) {
+                    showPurErrorTimed(err.message || 'Erro ao excluir itens da lista.');
+                  } finally {
+                    setIsClearingAllItems(false);
+                  }
+                }}
+                className="px-5 py-2 text-xs font-black bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              >
+                {isClearingAllItems ? (
+                  <>
+                    <RefreshCw size={13} className="animate-spin" />
+                    <span>Excluindo itens...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    <span>Sim, Excluir Todos</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Quick Add Product Modal from Purchase view */}
       {showQuickProductModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto overscroll-contain animate-in fade-in">
@@ -2712,11 +2813,11 @@ export function Purchases({
                   setOcrTargetMode('activePurchase');
                   setIsReceiptOcrOpen(true);
                 }}
-                className="flex items-center gap-1 px-2.5 sm:px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold transition-all border border-emerald-200"
-                title="Ler cupom fiscal"
+                className="flex items-center gap-1 px-2.5 sm:px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold transition-all border border-emerald-200 cursor-pointer"
+                title="Ler QR Code do cupom fiscal"
               >
-                <Receipt size={14} className="text-emerald-600" />
-                <span className="hidden sm:inline">Cupom</span>
+                <QrCode size={14} className="text-emerald-600" />
+                <span className="hidden sm:inline">QR Cupom</span>
               </button>
 
               <button

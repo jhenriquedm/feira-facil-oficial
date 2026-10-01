@@ -182,6 +182,198 @@ Diretrizes de Extração:
     }
   });
 
+  // API Route: SEFAZ NFC-e QR Code Fetcher & Intelligent Data Extractor
+  app.post('/api/sefaz/parse-qrcode', async (req, res) => {
+    try {
+      const { qrCodeUrl, rawText } = req.body;
+
+      let targetUrl = (qrCodeUrl || rawText || '').trim();
+      if (!targetUrl) {
+        return res.status(400).json({ error: 'Nenhum link de QR Code da SEFAZ foi fornecido.' });
+      }
+
+      // If text doesn't start with http/https, try to format
+      if (!/^https?:\/\//i.test(targetUrl)) {
+        if (targetUrl.includes('fazenda.') || targetUrl.includes('sefaz.') || targetUrl.includes('nfce')) {
+          targetUrl = `http://${targetUrl}`;
+        } else {
+          return res.status(400).json({ error: 'O conteúdo lido não corresponde a um link válido de QR Code da SEFAZ.' });
+        }
+      }
+
+      if (!apiKey) {
+        return res.status(500).json({
+          error: 'Chave de API do Gemini não configurada.',
+        });
+      }
+
+      console.log(`[SEFAZ QR Code] Consultando portal SEFAZ na URL: ${targetUrl}`);
+
+      // 1. Fetch HTML from SEFAZ Portal
+      let htmlContent = '';
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 18000);
+
+        const fetchResponse = await fetch(targetUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1'
+          },
+          redirect: 'follow',
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+        htmlContent = await fetchResponse.text();
+      } catch (fetchErr: any) {
+        console.warn('[SEFAZ QR Code] Falha ao acessar URL da SEFAZ diretamente:', fetchErr.message);
+        throw new Error(`Não foi possível conectar ao servidor da SEFAZ (${fetchErr.message}). Verifique se o portal estadual está online.`);
+      }
+
+      if (!htmlContent || htmlContent.length < 50) {
+        throw new Error('A página da SEFAZ retornou uma resposta vazia ou inacessível.');
+      }
+
+      // 2. Clean and prepare HTML to send to Gemini
+      // Strip base64 inline images, long script blocks and binary to keep payload lean
+      const cleanedHtml = htmlContent
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+        .replace(/data:image\/[^;]+;base64,[^\s"']+/gi, '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 150000); // Limit size for fast token processing
+
+      // 3. Use Gemini with Structured Output to extract exact NFC-e data
+      const systemInstruction = `Você é um extrator de alta precisão especializado em páginas de consulta pública de NFC-e (Nota Fiscal de Consumidor Eletrônica / Danfe NFC-e) dos portais SEFAZ de todos os estados brasileiros (SP, RJ, MG, RS, PR, SC, BA, CE, PE, GO, DF, MT, MS, ES, PA, etc.).
+
+A partir do código HTML / texto da página da SEFAZ fornecido:
+1. NOME DO ESTABELECIMENTO (market): Identifique a Razão Social ou Nome Fantasia do supermercado / hipermercado / loja emitente (ex: "Carrefour", "Pão de Açúcar", "Assaí Atacadista", "Supermercados Guanabara", "Atacadão", etc.).
+2. DATA DA EMISSÃO (date): Extraia a data no formato YYYY-MM-DD.
+3. VALOR TOTAL (totalAmount): O valor total pago ou valor da nota fiscal em Reais.
+4. DESCONTOS (discountAmount): Valor total de descontos aplicados (se houver).
+5. ITENS (items): Extraia todos os produtos listados na tabela de itens:
+   - name: Nome comercial limpo e legível do produto, expandindo abreviações fiscais crípticas (ex: "ARROZ TIO JOAO T1 5KG" -> "Arroz Tio João Tipo 1 5kg", "LEITE COND MOCA 395G" -> "Leite Condensado Moça 395g", "SABAO PO OMO LAV 1.6KG" -> "Sabão em Pó Omo Lavagem Perfeita 1.6kg").
+   - quantity: Quantidade adquirida (número real, preservando decimais em itens pesados como 0.540 ou 1.25).
+   - unit: Unidade de medida ('Un', 'Kg', 'L', 'G', 'Pacote', 'Caixa', 'Bandeja', 'Lata', 'Garrafa', 'Pote', 'Saco').
+   - unitPrice: Preço unitário em Reais.
+   - totalPrice: Preço total do item (quantidade * preço unitário).
+   - category: Uma categoria apropriada: Açougue, Bebidas, Limpeza, Hortifruti, Mercearia, Higiene, Padaria, Laticínios, Congelados, Pet Shop, Bazar, Outros.
+   - brand: Marca identificada no nome do produto (ex: "Nestlé", "Omo", "Camil", "Sadia", "Coca-Cola") ou string vazia.
+   - barcode: Código EAN/GTIN se constar na tabela fiscal ou string vazia.`;
+
+      const schema = {
+        type: Type.OBJECT,
+        properties: {
+          market: {
+            type: Type.STRING,
+            description: 'Nome do supermercado ou estabelecimento emitente.'
+          },
+          date: {
+            type: Type.STRING,
+            description: 'Data da compra no formato YYYY-MM-DD.'
+          },
+          totalAmount: {
+            type: Type.NUMBER,
+            description: 'Valor total em Reais.'
+          },
+          discountAmount: {
+            type: Type.NUMBER,
+            description: 'Valor de descontos em Reais.'
+          },
+          items: {
+            type: Type.ARRAY,
+            description: 'Lista completa de itens decodificados da NFC-e da SEFAZ.',
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: {
+                  type: Type.STRING,
+                  description: 'Nome comercial limpo do produto.'
+                },
+                quantity: {
+                  type: Type.NUMBER,
+                  description: 'Quantidade adquirida.'
+                },
+                unit: {
+                  type: Type.STRING,
+                  enum: ['Un', 'Kg', 'L', 'G', 'Pacote', 'Caixa', 'Bandeja', 'Lata', 'Garrafa', 'Pote', 'Saco'],
+                  description: 'Unidade de medida.'
+                },
+                unitPrice: {
+                  type: Type.NUMBER,
+                  description: 'Preço unitário em Reais.'
+                },
+                totalPrice: {
+                  type: Type.NUMBER,
+                  description: 'Preço total deste item.'
+                },
+                category: {
+                  type: Type.STRING,
+                  description: 'Categoria de supermercado sugerida.'
+                },
+                brand: {
+                  type: Type.STRING,
+                  description: 'Marca identificada ou string vazia.'
+                },
+                barcode: {
+                  type: Type.STRING,
+                  description: 'Código de barras EAN se disponível.'
+                }
+              },
+              required: ['name', 'quantity', 'unit', 'unitPrice', 'totalPrice', 'category']
+            }
+          }
+        },
+        required: ['market', 'items']
+      };
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: `Analise o seguinte conteúdo da página da SEFAZ e extraia todos os produtos da NFC-e:\n\nURL Consultada: ${targetUrl}\n\nHTML da SEFAZ:\n${cleanedHtml}`,
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: schema,
+          temperature: 0.1,
+        }
+      });
+
+      const text = response.text;
+      if (!text) {
+        throw new Error('A IA não conseguiu decodificar os dados fiscais da SEFAZ.');
+      }
+
+      const parsed = JSON.parse(text);
+      if (!parsed.items || !Array.isArray(parsed.items) || parsed.items.length === 0) {
+        throw new Error('Nenhum item foi encontrado nesta consulta de NFC-e da SEFAZ. Verifique se a nota foi emitida e está autorizada.');
+      }
+
+      parsed.items = parsed.items.map((it: any) => ({
+        ...it,
+        brand: (it.brand && String(it.brand).toLowerCase() !== 'null' && String(it.brand).toLowerCase() !== 'undefined') ? String(it.brand).trim() : '',
+        barcode: it.barcode ? String(it.barcode).trim() : ''
+      }));
+
+      console.log(`[SEFAZ QR Code] Sucesso! ${parsed.items.length} itens extraídos de "${parsed.market}".`);
+      res.json(parsed);
+    } catch (error: any) {
+      console.error('[SEFAZ QR Code] Erro ao processar:', error);
+      res.status(500).json({ error: error.message || 'Erro ao processar consulta da SEFAZ.' });
+    }
+  });
+
   // API Route: AI Shopping List Generator based on Recipe / Event
   app.post('/api/gemini/recipe-shopping-list', async (req, res) => {
     try {
