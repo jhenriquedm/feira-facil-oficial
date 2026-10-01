@@ -14,14 +14,23 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.5.1',
-  buildNumber: 61,
+  version: '1.5.2',
+  buildNumber: 62,
   releaseDate: '2026-10-01',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.5.2',
+      date: '2026-10-01',
+      highlights: [
+        'Correção definitiva do reconhecimento de nova versão no primeiro lançamento do APK no celular',
+        'Limpeza proativa e imediata do cache do WebView no Android na primeira abertura após atualizar o APK',
+        'Desativação do Service Worker desnecessário no app nativo para carregar os arquivos atualizados sem atraso'
+      ]
+    },
     {
       version: '1.5.1',
       date: '2026-10-01',

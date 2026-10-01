@@ -23,6 +23,27 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+
+    <!-- Instant cache invalidation for Native Capacitor & WebView on app updates -->
+    <script>
+      (function() {
+        try {
+          var isCapacitor = window.Capacitor || window.location.protocol === 'capacitor:' || window.location.hostname === 'localhost';
+          if (isCapacitor) {
+            if ('serviceWorker' in navigator) {
+              navigator.serviceWorker.getRegistrations().then(function(regs) {
+                regs.forEach(function(r) { r.unregister(); });
+              });
+            }
+            if ('caches' in window) {
+              caches.keys().then(function(keys) {
+                keys.forEach(function(k) { caches.delete(k); });
+              });
+            }
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <script>
