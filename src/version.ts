@@ -14,14 +14,24 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.4.9',
-  buildNumber: 59,
+  version: '1.5.0',
+  buildNumber: 60,
   releaseDate: '2026-10-01',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.5.0',
+      date: '2026-10-01',
+      highlights: [
+        'Correção definitiva do erro de rede (Failed to fetch) na leitura de QR Code do Cupom Fiscal no APK Android',
+        'Integração nativa direta com a SEFAZ via CapacitorHttp no celular sem depender de proxy externo',
+        'Parser inteligente de HTML da SEFAZ direto no app com decodificação de produtos, quantidades, valores e chave de acesso',
+        'Tratamento amigável de erros e mensagens explicativas em caso de instabilidade nos servidores fiscais estaduais'
+      ]
+    },
     {
       version: '1.4.9',
       date: '2026-10-01',

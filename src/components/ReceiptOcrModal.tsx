@@ -11,6 +11,7 @@ import { sanitizeAndCapitalize } from '../utils/textFormatters';
 import { PRODUCT_UNITS, normalizeProductUnit } from '../utils/units';
 import { normalizeBrand } from '../utils/brand';
 import { getApiUrl } from '../utils/apiConfig';
+import { fetchSefazQrCodeData } from '../utils/sefazParser';
 
 export interface OcrExtractedItem {
   id: string;
@@ -442,7 +443,7 @@ export function ReceiptOcrModal({
     e.target.value = '';
   };
 
-  // Process SEFAZ NFC-e QR Code via backend proxy & Gemini parser
+  // Process SEFAZ NFC-e QR Code via universal parser
   const processSefazQrCode = async (qrCodeUrlOrKey: string) => {
     setStep('processing');
     setIsProcessing(true);
@@ -450,21 +451,7 @@ export function ReceiptOcrModal({
     setProcessingStatus('Consultando Portal da SEFAZ e extraindo produtos...');
 
     try {
-      const response = await fetch(getApiUrl('/api/sefaz/parse-qrcode'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          qrCodeUrl: qrCodeUrlOrKey,
-          rawText: qrCodeUrlOrKey
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Erro ao consultar a SEFAZ.');
-      }
-
-      const result = await response.json();
+      const result = await fetchSefazQrCodeData(qrCodeUrlOrKey);
 
       if (!result.items || !Array.isArray(result.items) || result.items.length === 0) {
         throw new Error('Nenhum item de compra foi encontrado nesta consulta da SEFAZ. Verifique se o QR Code é de uma NFC-e válida.');
@@ -495,7 +482,12 @@ export function ReceiptOcrModal({
       setStep('review');
     } catch (err: any) {
       console.error(err);
-      setErrorMessage(err.message || 'Falha ao processar o QR Code na SEFAZ.');
+      const isNetworkErr = err?.message?.includes('Failed to fetch') || err?.message?.includes('NetworkError');
+      setErrorMessage(
+        isNetworkErr
+          ? 'Não foi possível conectar ao portal da SEFAZ no momento. Verifique sua conexão à internet ou adicione os itens manualmente.'
+          : (err.message || 'Falha ao processar o QR Code na SEFAZ.')
+      );
       setStep('capture');
     } finally {
       setIsProcessing(false);
