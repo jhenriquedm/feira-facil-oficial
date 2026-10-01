@@ -281,7 +281,7 @@ export function parseSefazHtml(html: string, originalUrl?: string): OcrResultDat
       let quantity = 1;
       const qtdEl = row.querySelector('.Rqtd, .qtd, .quantidade, .qCom');
       if (qtdEl && qtdEl.textContent) {
-        quantity = parseBrlNumber(qtdEl.textContent.replace(/[^0-9.,]/g, '')) || 1;
+        quantity = parseBrlNumber(qtdEl.textContent) || 1;
       } else {
         const matchQtd = rowText.match(/Qtde\.:?\s*([0-9.,]+)/i) || rowText.match(/QTD:?\s*([0-9.,]+)/i);
         if (matchQtd) quantity = parseBrlNumber(matchQtd[1]) || 1;
@@ -348,9 +348,6 @@ export function parseSefazHtml(html: string, originalUrl?: string): OcrResultDat
 
   // Method B: Regex parsing on plain text if table selectors were empty
   if (items.length === 0) {
-    // Regex pattern for typical NFC-e text printout lines:
-    // "7891515614065 FILEZ FGO PERD 1KG 1 BJ x 16,98 16,98"
-    // or "(Código: 7891515614065) FILEZ FGO PERD 1KG Qtde.: 1 UN: BJ Vl. Unit.: 16,98 Vl. Total: 16,98"
     const lineRegex = /(?:(\d{7,14})\s+)?([A-Z0-9\s\.\,\-\/\%]{3,45}?)\s+([0-9.,]+)\s*([A-Za-z]{1,4})\s*(?:x|X|\*|Vl\.\s*Unit\.:?)\s*([0-9.,]+)\s+([0-9.,]+)/gi;
     let match: RegExpExecArray | null;
 
@@ -376,6 +373,14 @@ export function parseSefazHtml(html: string, originalUrl?: string): OcrResultDat
           selected: true
         });
       }
+    }
+  }
+
+  // Ensure totalAmount aligns with items sum if missing or misparsed
+  const itemsSum = items.reduce((acc, it) => acc + (it.totalPrice || 0), 0);
+  if (!totalAmount || totalAmount <= 0 || (itemsSum > 0 && Math.abs(totalAmount - itemsSum) > itemsSum * 0.8)) {
+    if (itemsSum > 0) {
+      totalAmount = Number(itemsSum.toFixed(2));
     }
   }
 
@@ -424,12 +429,14 @@ export function parseQrCodeParameters(qrText: string): Partial<OcrResultData> & 
       if (!chaveAcesso && parts[0]?.length === 44) {
         chaveAcesso = parts[0];
       }
-      // Value is usually part 4 or 5
-      for (const part of parts) {
-        if (/^\d+\.\d{2}$/.test(part.trim())) {
-          const val = parseFloat(part.trim());
+      // Value vNF is index 4, 5, or 6
+      for (let i = 4; i < Math.min(parts.length, 7); i++) {
+        const partVal = parts[i]?.trim();
+        if (/^\d+(\.\d{1,2})?$/.test(partVal)) {
+          const val = parseFloat(partVal);
           if (val > 0 && !totalAmount) {
             totalAmount = val;
+            break;
           }
         }
       }

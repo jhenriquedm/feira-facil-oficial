@@ -17,6 +17,16 @@ describe('Text Formatters & Sanitizers', () => {
       expect(sanitizeAndCapitalize('  banana prata  ')).toBe('Banana Prata  ');
     });
 
+    it('preserves all Brazilian Portuguese accented characters including circumflex ê, â, ô, and combining marks', () => {
+      expect(sanitizeAndCapitalize('vinho rosê')).toBe('Vinho Rosê');
+      expect(sanitizeAndCapitalize('café conilon')).toBe('Café Conilon');
+      expect(sanitizeAndCapitalize('pão francês')).toBe('Pão Francês');
+      expect(sanitizeAndCapitalize('açúcar união')).toBe('Açúcar União');
+      expect(sanitizeAndCapitalize('maçã fuji')).toBe('Maçã Fuji');
+      expect(sanitizeAndCapitalize('pêssego em calda')).toBe('Pêssego Em Calda');
+      expect(sanitizeAndCapitalize('maionese sabor limão')).toBe('Maionese Sabor Limão');
+    });
+
     it('limits length according to maxLength parameter', () => {
       expect(sanitizeAndCapitalize('arroz super longo com muitos caracteres adicionais', 10)).toBe('Arroz Supe');
     });

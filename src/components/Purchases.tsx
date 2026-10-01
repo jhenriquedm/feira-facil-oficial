@@ -148,7 +148,7 @@ export function Purchases({
     discount?: number;
     items: OcrExtractedItem[];
   }) => {
-    // 1. Create the new purchase
+    // 1. Create the new purchase as an empty list (only items from note will be added)
     const newPurchase = await addPurchase(
       data.name,
       data.market,
@@ -157,15 +157,34 @@ export function Purchases({
       'Importado via Leitor OCR de Cupom Fiscal',
       undefined,
       data.discount || 0,
-      0
+      0,
+      true // isEmptyList = true: only contain the scanned items from the fiscal note!
     );
 
-    // 2. Add each recognized item to the purchase and catalog
+    // 2. Add each recognized item to the purchase and link to catalog
     for (const item of data.items) {
+      const cleanItemName = item.name.trim();
       const normBrand = normalizeBrand(item.brand);
-      let matchedProduct = products.find(
-        p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase() && isSameBrand(p.brand, normBrand)
-      );
+      const cleanBarcode = item.barcode ? item.barcode.trim().replace(/\D/g, '') : '';
+
+      // Check for existing product to prevent duplicate items in catalog
+      let matchedProduct = products.find(p => {
+        if (cleanBarcode && p.barcode && p.barcode.trim().replace(/\D/g, '') === cleanBarcode) {
+          return true;
+        }
+        const sameName = p.name.trim().toLowerCase() === cleanItemName.toLowerCase();
+        if (sameName && isSameBrand(p.brand, normBrand)) {
+          return true;
+        }
+        if (sameName && !normBrand && !p.brand) {
+          return true;
+        }
+        return false;
+      });
+
+      if (!matchedProduct && !normBrand) {
+        matchedProduct = products.find(p => p.name.trim().toLowerCase() === cleanItemName.toLowerCase());
+      }
 
       let categoryId = categories[0]?.id || 'cat_default';
       const foundCategory = categories.find(
@@ -178,37 +197,36 @@ export function Purchases({
       if (!matchedProduct) {
         try {
           matchedProduct = await addProduct(
-            item.name.trim(),
+            cleanItemName,
             categoryId,
             item.unit,
             normBrand,
             item.unitPrice,
-            item.barcode
+            cleanBarcode
           );
         } catch (e) {
+          // If already exists or validation caught duplicate, match existing
           matchedProduct = products.find(
-            p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase() && isSameBrand(p.brand, normBrand)
-          ) || products.find(
-            p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase()
+            p => p.name.trim().toLowerCase() === cleanItemName.toLowerCase()
           );
         }
       }
 
       await addPurchaseItem(newPurchase.id, {
         productId: matchedProduct?.id || `prod_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        productName: item.name.trim(),
+        productName: cleanItemName,
         productBrand: normBrand || normalizeBrand(matchedProduct?.brand) || '',
         categoryId: categoryId,
         categoryName: foundCategory?.name || item.category || 'Mercearia',
         unit: item.unit,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        barcode: item.barcode
+        barcode: cleanBarcode || undefined
       });
     }
 
     setSelectedPurchaseId(newPurchase.id);
-    setOcrFeedbackMessage(`Cupom fiscal lido com sucesso! ${data.items.length} itens importados para "${newPurchase.name}".`);
+    setOcrFeedbackMessage(`Cupom fiscal lido com sucesso!\n${data.items.length} itens importados para "${newPurchase.name}".`);
     setTimeout(() => setOcrFeedbackMessage(null), 6000);
   };
 
@@ -216,10 +234,27 @@ export function Purchases({
     if (!selectedPurchaseId) return;
 
     for (const item of items) {
+      const cleanItemName = item.name.trim();
       const normBrand = normalizeBrand(item.brand);
-      let matchedProduct = products.find(
-        p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase() && isSameBrand(p.brand, normBrand)
-      );
+      const cleanBarcode = item.barcode ? item.barcode.trim().replace(/\D/g, '') : '';
+
+      let matchedProduct = products.find(p => {
+        if (cleanBarcode && p.barcode && p.barcode.trim().replace(/\D/g, '') === cleanBarcode) {
+          return true;
+        }
+        const sameName = p.name.trim().toLowerCase() === cleanItemName.toLowerCase();
+        if (sameName && isSameBrand(p.brand, normBrand)) {
+          return true;
+        }
+        if (sameName && !normBrand && !p.brand) {
+          return true;
+        }
+        return false;
+      });
+
+      if (!matchedProduct && !normBrand) {
+        matchedProduct = products.find(p => p.name.trim().toLowerCase() === cleanItemName.toLowerCase());
+      }
 
       let categoryId = categories[0]?.id || 'cat_default';
       const foundCategory = categories.find(
@@ -232,36 +267,34 @@ export function Purchases({
       if (!matchedProduct) {
         try {
           matchedProduct = await addProduct(
-            item.name.trim(),
+            cleanItemName,
             categoryId,
             item.unit,
             normBrand,
             item.unitPrice,
-            item.barcode
+            cleanBarcode
           );
         } catch (e) {
           matchedProduct = products.find(
-            p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase() && isSameBrand(p.brand, normBrand)
-          ) || products.find(
-            p => p.name.trim().toLowerCase() === item.name.trim().toLowerCase()
+            p => p.name.trim().toLowerCase() === cleanItemName.toLowerCase()
           );
         }
       }
 
       await addPurchaseItem(selectedPurchaseId, {
         productId: matchedProduct?.id || `prod_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        productName: item.name.trim(),
+        productName: cleanItemName,
         productBrand: normBrand || normalizeBrand(matchedProduct?.brand) || '',
         categoryId: categoryId,
         categoryName: foundCategory?.name || item.category || 'Mercearia',
         unit: item.unit,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        barcode: item.barcode
+        barcode: cleanBarcode || undefined
       });
     }
 
-    setOcrFeedbackMessage(`${items.length} itens do cupom fiscal foram adicionados com sucesso à sua lista!`);
+    setOcrFeedbackMessage(`Cupom fiscal lido com sucesso!\n${items.length} itens foram adicionados à sua lista de compras.`);
     setTimeout(() => setOcrFeedbackMessage(null), 6000);
   };
 
@@ -2837,7 +2870,7 @@ export function Purchases({
       {ocrFeedbackMessage && (
         <div className="fixed bottom-24 sm:bottom-8 right-4 z-50 p-4 bg-emerald-600 text-white rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-bold animate-in slide-in-from-bottom-3 max-w-md">
           <CheckCircle2 size={18} className="shrink-0 text-white" />
-          <span className="flex-1">{ocrFeedbackMessage}</span>
+          <span className="flex-1 whitespace-pre-line leading-relaxed">{ocrFeedbackMessage}</span>
           <button
             type="button"
             onClick={() => setOcrFeedbackMessage(null)}

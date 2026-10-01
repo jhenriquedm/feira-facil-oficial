@@ -473,12 +473,19 @@ export function ReceiptOcrModal({
       const detectedMarket = (result.market || 'Supermercado').trim();
       const detectedDate = result.date || new Date().toISOString().substring(0, 10);
       
+      const cleanShortMarket = detectedMarket.replace(/^(SUPERMERCADOS?|HIPERMERCADOS?|ATACAD[AÃ]O|MERCADO)\s+/i, '').trim() || detectedMarket;
+      const dateShort = detectedDate.split('-').reverse().slice(0, 2).join('/');
+      const generatedTitle = `Compra ${cleanShortMarket} - ${dateShort}`.slice(0, 45).trim();
+
+      const itemsSum = mappedItems.reduce((acc, it) => acc + (it.totalPrice || 0), 0);
+      const finalTotal = result.totalAmount && result.totalAmount >= itemsSum ? result.totalAmount : itemsSum;
+
       setExtractedMarket(detectedMarket);
       setExtractedDate(detectedDate);
-      setExtractedTotal(result.totalAmount);
+      setExtractedTotal(finalTotal > 0 ? finalTotal : itemsSum);
       setExtractedDiscount(result.discountAmount);
       setExtractedItems(mappedItems);
-      setPurchaseTitle(`Compra ${detectedMarket} - ${detectedDate.split('-').reverse().slice(0, 2).join('/')}`);
+      setPurchaseTitle(generatedTitle);
       setStep('review');
     } catch (err: any) {
       console.error(err);
@@ -542,6 +549,28 @@ export function ReceiptOcrModal({
       return;
     }
 
+    // Validate that all selected items have valid non-empty fields
+    for (const item of selectedItems) {
+      if (!item.name || item.name.trim().length < 2) {
+        setErrorMessage('Preencha a descrição de todos os itens da lista antes de salvar.');
+        return;
+      }
+      if (!item.quantity || item.quantity <= 0) {
+        setErrorMessage(`A quantidade do item "${item.name}" deve ser maior que zero.`);
+        return;
+      }
+      if (item.unitPrice === undefined || item.unitPrice < 0) {
+        setErrorMessage(`O preço do item "${item.name}" não pode ser negativo.`);
+        return;
+      }
+    }
+
+    const cleanTitle = (purchaseTitle.trim() || `Compra ${extractedMarket}`).slice(0, 50);
+    if (!activePurchaseId && (cleanTitle.length < 2 || cleanTitle.length > 50)) {
+      setErrorMessage('O nome da lista de compras deve possuir entre 2 e 50 caracteres.');
+      return;
+    }
+
     try {
       setIsProcessing(true);
       if (activePurchaseId && onConfirmAddToActivePurchase) {
@@ -550,7 +579,7 @@ export function ReceiptOcrModal({
         await onConfirmNewPurchase({
           market: extractedMarket.trim() || 'Supermercado',
           date: extractedDate || new Date().toISOString().substring(0, 10),
-          name: purchaseTitle.trim() || `Compra ${extractedMarket}`,
+          name: cleanTitle,
           discount: extractedDiscount,
           items: selectedItems
         });
@@ -916,7 +945,7 @@ export function ReceiptOcrModal({
                 </label>
                 <div className="flex items-center gap-2">
                   <span className="text-base font-black text-emerald-700">
-                    {extractedTotal !== undefined ? formatCurrency(extractedTotal) : 'Não indicado'}
+                    {formatCurrency(extractedTotal && extractedTotal >= selectedTotal ? extractedTotal : (selectedTotal > 0 ? selectedTotal : (extractedTotal || 0)))}
                   </span>
                   {extractedDiscount !== undefined && extractedDiscount > 0 && (
                     <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
@@ -934,10 +963,10 @@ export function ReceiptOcrModal({
                 </label>
                 <input
                   type="text"
-                  maxLength={40}
+                  maxLength={50}
                   value={purchaseTitle}
-                  onChange={(e) => setPurchaseTitle(sanitizeAndCapitalize(e.target.value, 40))}
-                  placeholder="Ex: Compra Carrefour - 25/09"
+                  onChange={(e) => setPurchaseTitle(sanitizeAndCapitalize(e.target.value, 50))}
+                  placeholder="Ex: Compra Supermercado - 01/10"
                   className="w-full px-3 py-2 text-base sm:text-xs bg-white border border-neutral-200 rounded-xl text-neutral-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>

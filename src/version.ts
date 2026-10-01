@@ -14,14 +14,28 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.5.0',
-  buildNumber: 60,
+  version: '1.5.1',
+  buildNumber: 61,
   releaseDate: '2026-10-01',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.5.1',
+      date: '2026-10-01',
+      highlights: [
+        'Importação exclusiva dos itens do cupom fiscal para a compra sem copiar o catálogo inteiro de produtos',
+        'Correção na exclusão de produtos: produtos desvinculados de listas ativas podem ser apagados sem falso bloqueio',
+        'Total da nota fiscal ajustado dinamicamente para corresponder à soma real dos produtos lidos',
+        'Limite de 50 caracteres no título da lista de compras com geração automática compacta',
+        'Mensagem de sucesso com quebra de linha elegante indicando o número de itens importados',
+        'Prevenção contra duplicidade de produtos no catálogo ao importar notas fiscais com mesmos itens',
+        'Validação obrigatória de dados ao adicionar novas linhas manuais na prévia do cupom',
+        'Suporte completo a letras acentuadas (ex: circunflexo "ê" em "Vinho Rosê", til "ã", agudo "á", etc.)'
+      ]
+    },
     {
       version: '1.5.0',
       date: '2026-10-01',

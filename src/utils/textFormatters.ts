@@ -18,10 +18,14 @@ export function sanitizeAndCapitalize(
   let noLeading = text.replace(/^\s+/, '');
   if (!noLeading) return '';
 
-  // 2. Remove special characters (keep letters, accented letters, spaces, and optionally numbers)
+  // 2. Remove special characters (keep letters, accented letters: á, à, â, ã, é, ê, í, ó, ô, õ, ú, ç, ü, etc., spaces, and optionally numbers)
   // Also keep common safe punctuation like hyphen, dot, comma
-  let pattern = allowNumbers ? /[^a-zA-Z0-9À-ÿ\s\-\.,]/g : /[^a-zA-ZÀ-ÿ\s\-\.,]/g;
-  let cleaned = noLeading.replace(pattern, '');
+  // \u00C0-\u024F: Latin Extended-A & B (all accented vowels and consonants)
+  // \u0300-\u036F: Combining Diacritical Marks for Android/iOS virtual keyboard IME compositions
+  let pattern = allowNumbers 
+    ? /[^a-zA-Z0-9\u00C0-\u024F\u0300-\u036F\s\-\.,]/g 
+    : /[^a-zA-Z\u00C0-\u024F\u0300-\u036F\s\-\.,]/g;
+  let cleaned = noLeading.replace(pattern, '').normalize('NFC');
 
   // 3. Limit maximum characters
   if (cleaned.length > maxLength) {
@@ -38,8 +42,8 @@ export function sanitizeText(
   maxLength: number = 200
 ): string {
   if (!text) return '';
-  // Strip dangerous/unwanted special chars
-  let cleaned = text.replace(/[^a-zA-Z0-9À-ÿ\s\-\.,!?:;@()/%]/g, '');
+  // Strip dangerous/unwanted special chars while keeping all accented letters and combining marks
+  let cleaned = text.replace(/[^a-zA-Z0-9\u00C0-\u024F\u0300-\u036F\s\-\.,!?:;@()/%]/g, '').normalize('NFC');
   if (cleaned.length > maxLength) {
     cleaned = cleaned.slice(0, maxLength);
   }

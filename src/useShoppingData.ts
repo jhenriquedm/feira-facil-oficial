@@ -2404,12 +2404,16 @@ export function useShoppingData() {
   };
 
   const deleteProduct = async (id: string) => {
-    // Block if product is used in ANY purchase list/feira (active or completed)
-    const allItems = Object.values(purchaseItems).flat();
-    const isUsedInAnyPurchase = allItems.some(item => item.productId === id);
+    // Block if product is used in an existing purchase list/feira that is in the user's purchases list
+    const existingPurchaseIds = new Set(purchases.map(p => p.id));
+    const isUsedInExistingPurchase = purchases.some(p => {
+      const items = purchaseItems[p.id] || [];
+      return items.some(item => item.productId === id);
+    });
     
-    if (isUsedInAnyPurchase) {
-      throw new Error("Não é possível excluir este produto pois ele já está sendo utilizado em uma lista/feira.");
+    if (isUsedInExistingPurchase) {
+      const usedPurchase = purchases.find(p => (purchaseItems[p.id] || []).some(item => item.productId === id));
+      throw new Error(`Não é possível excluir este produto pois ele está em uso na lista de compras "${usedPurchase?.name || 'Lista Ativa'}". Remova o item da lista antes de excluir o produto.`);
     }
 
     const uid = user ? user.uid : 'guest';
