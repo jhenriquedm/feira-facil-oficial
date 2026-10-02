@@ -21,6 +21,7 @@ interface ProductsProps {
   addProduct: (name: string, categoryId: string, unit: string, brand: string, lastPrice: number, barcode?: string) => Promise<Product>;
   updateProduct: (id: string, data: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
+  deleteUnusedProducts?: () => Promise<{ deletedCount: number; protectedCount: number }>;
 }
 
 export function Products({
@@ -33,12 +34,47 @@ export function Products({
   deleteCategory,
   addProduct,
   updateProduct,
-  deleteProduct
+  deleteProduct,
+  deleteUnusedProducts
 }: ProductsProps) {
   const [activeSubTab, setActiveSubTab] = useState<'products' | 'categories'>('products');
   const [productSearch, setProductSearch] = useState('');
   const [categorySearch, setCategorySearch] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
+  // Calculate unused products vs products in use
+  const unusedProductsInfo = useMemo(() => {
+    const usedProductIds = new Set(
+      purchases.flatMap(p => (purchaseItems[p.id] || []).map(i => i.productId))
+    );
+    const unused = products.filter(p => !usedProductIds.has(p.id));
+    const inUse = products.filter(p => usedProductIds.has(p.id));
+    return {
+      unusedCount: unused.length,
+      inUseCount: inUse.length,
+      totalCount: products.length
+    };
+  }, [products, purchases, purchaseItems]);
+
+  const handleBulkDeleteUnusedProducts = async () => {
+    if (!deleteUnusedProducts) return;
+    try {
+      setIsBulkDeleting(true);
+      const res = await deleteUnusedProducts();
+      setShowBulkDeleteModal(false);
+      if (res.deletedCount > 0) {
+        showProductSuccessTimed(`${res.deletedCount} produto(s) não vinculados a compras foram excluídos com sucesso!`);
+      } else {
+        showProductErrorTimed('Nenhum produto foi excluído pois todos estão vinculados a compras.');
+      }
+    } catch (err: any) {
+      showProductErrorTimed(err.message || 'Erro ao excluir produtos.');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
 
   // Error and Success feedback states with 3-second auto dismiss
   const [productError, setProductError] = useState<string | null>(null);
@@ -583,6 +619,20 @@ export function Products({
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
+                {/* Bulk Delete Unused Products Button */}
+                {products.length > 0 && deleteUnusedProducts && (
+                  <button
+                    type="button"
+                    onClick={() => setShowBulkDeleteModal(true)}
+                    className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2.5 bg-red-50 hover:bg-red-100 active:scale-95 text-red-700 border border-red-200 rounded-xl text-xs sm:text-sm font-bold shadow-2xs transition-all cursor-pointer"
+                    title="Excluir todos os produtos do catálogo que não estão sendo usados em compras"
+                  >
+                    <Trash2 size={16} className="shrink-0 text-red-600" />
+                    <span className="hidden sm:inline">Excluir Não Utilizados</span>
+                    <span className="sm:hidden">Limpar</span>
+                  </button>
+                )}
+
                 {/* Scan Barcode Button */}
                 <button
                   type="button"
@@ -1286,6 +1336,76 @@ export function Products({
               >
                 Fechar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Modal de Confirmação para Excluir Todos os Produtos Não Utilizados */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-3xl p-5 sm:p-6 shadow-2xl border border-neutral-200 space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center gap-3 text-red-600 border-b border-neutral-100 pb-3">
+              <div className="p-2.5 bg-red-50 rounded-2xl">
+                <Trash2 size={22} />
+              </div>
+              <div>
+                <h3 className="font-black text-base text-neutral-900">Excluir Produtos Não Utilizados?</h3>
+                <p className="text-[11px] text-neutral-400">Limpeza em lote do catálogo</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs text-neutral-600">
+              {unusedProductsInfo.unusedCount > 0 ? (
+                <>
+                  <p>
+                    Esta ação excluirá permanentemente <strong className="text-red-600 font-black">{unusedProductsInfo.unusedCount} produto(s)</strong> do catálogo que não possuem vínculo com nenhuma lista de compras.
+                  </p>
+                  {unusedProductsInfo.inUseCount > 0 && (
+                    <div className="p-3 bg-sky-50 border border-sky-100 rounded-xl text-sky-800 text-[11px] space-y-1">
+                      <p className="font-bold">🛡️ Produtos em compras protegidos:</p>
+                      <p>
+                        <strong>{unusedProductsInfo.inUseCount} produto(s)</strong> vinculados a listas de compras ativas ou finalizadas serão mantidos e protegidos com total segurança.
+                      </p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl text-amber-800 text-xs">
+                  <p className="font-bold">Nenhum produto desvinculado encontrado.</p>
+                  <p className="text-[11px] mt-1">
+                    Todos os <strong>{unusedProductsInfo.totalCount} produto(s)</strong> cadastrados estão atualmente vinculados a listas de compras e, pela regra de integridade, não podem ser excluídos.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100">
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="px-4 py-2 border border-neutral-200 rounded-xl text-xs font-bold text-neutral-700 hover:bg-neutral-50 cursor-pointer disabled:opacity-50"
+              >
+                {unusedProductsInfo.unusedCount > 0 ? 'Cancelar' : 'Entendido'}
+              </button>
+
+              {unusedProductsInfo.unusedCount > 0 && (
+                <button
+                  type="button"
+                  disabled={isBulkDeleting}
+                  onClick={handleBulkDeleteUnusedProducts}
+                  className="px-5 py-2 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isBulkDeleting ? (
+                    <span>Excluindo...</span>
+                  ) : (
+                    <>
+                      <Trash2 size={14} />
+                      <span>Excluir {unusedProductsInfo.unusedCount} Produtos</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>

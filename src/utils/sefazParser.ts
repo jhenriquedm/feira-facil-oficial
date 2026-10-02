@@ -13,10 +13,10 @@ export const UF_IBGE_MAP: Record<string, string> = {
 export function inferProductCategory(productName: string): string {
   const norm = productName.toLowerCase();
   
-  if (/\b(carne|frango|bife|costela|linguica|linguiça|alcatra|patinho|picanha|maminha|acem|acém|file|filé|peito|coxa|sobrecoxa|bacon|pernil|suino|suíno|boi|bovino|porco|salsicha|linguica|tilapia|tilápia|peixe|camarao|camarão|salmao|salmão|perd|sadia|seara|friboi)\b/i.test(norm)) {
+  if (/\b(carne|frango|bife|costela|linguica|linguiça|alcatra|patinho|picanha|maminha|acem|acém|file|filé|peito|coxa|sobrecoxa|bacon|pernil|suino|suíno|boi|bovino|porco|salsicha|tilapia|tilápia|peixe|camarao|camarão|salmao|salmão|perd|sadia|seara|friboi)\b/i.test(norm)) {
     return 'Açougue';
   }
-  if (/\b(leite|queijo|manteiga|margarina|iogurte|requeijao|requeijão|mussarela|mucarela|mozzarella|parmesao|parmesão|ricota|coalhada|danone|yakult|activia)\b/i.test(norm)) {
+  if (/\b(leite|queijo|manteiga|margarina|iogurte|requeijao|requeijão|mussarela|mucarela|mozzarella|parmesao|parmesão|ricota|coalhada|danone|yakult|activia|ovo|ovos)\b/i.test(norm)) {
     return 'Laticínios';
   }
   if (/\b(arroz|feijao|feijão|macarrao|macarrão|oleo|óleo|azeite|farinha|acucar|açúcar|sal|cafe|café|milho|ervilha|molho|extrato|molho de tomate|maionese|ketchup|mostarda|vinagre|trigo|massa|miojo|sopa)\b/i.test(norm)) {
@@ -47,12 +47,26 @@ export function cleanProductDescription(raw: string): string {
   
   let name = raw.replace(/\s+/g, ' ').trim();
 
+  // 1. Strip NFC-e metadata tails (quantities, units, prices, codes)
+  // e.g. "Acem Esp Kg Qtde.:0,236 UN: KG Vl. Unit.: 37,95" -> "Acem Esp Kg"
+  // e.g. "Ovo Naturaves Bco Gd C 30un Qtde.:1 UN: UN Vl. Unit.: 15,49" -> "Ovo Naturaves Bco Gd C 30un"
+  name = name
+    .replace(/\(Código:[^)]*\)/gi, '')
+    .replace(/\bCódigo:\s*\d+/gi, '')
+    .replace(/\b(?:Qtde?|Qtd|Quantidade)\.?\s*:\s*[0-9.,]+.*$/gi, '')
+    .replace(/\bUN\s*:\s*[A-Za-z0-9]+.*$/gi, '')
+    .replace(/\bVl\.?\s*(?:Unit|Total|Item|Unit[aá]rio)\.?\s*:\s*[0-9.,]+.*$/gi, '')
+    .replace(/\bValor\s*(?:Unit|Total|Item|Unit[aá]rio)?\s*:\s*[0-9.,]+.*$/gi, '')
+    .replace(/\b(?:x|X|\*)\s*[0-9.,]+\s+[0-9.,]+.*$/gi, '')
+    .replace(/[\s\-\:\.\,]+$/, '')
+    .trim();
+
   // If entire string is uppercase, convert to Title Case base first
   if (name === name.toUpperCase()) {
     name = name.toLowerCase().replace(/(^|\s)[a-z]/g, (l) => l.toUpperCase());
   }
 
-  // Common fiscal substitutions
+  // Common fiscal abbreviations substitutions
   name = name
     .replace(/\bFILEZ\b/gi, 'Filé')
     .replace(/\bFGO\b/gi, 'Frango')

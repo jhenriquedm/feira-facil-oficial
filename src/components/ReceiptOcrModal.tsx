@@ -7,7 +7,7 @@ import {
   Smartphone, Info, QrCode, Link as LinkIcon, CheckCheck
 } from 'lucide-react';
 import { Category, Product } from '../types';
-import { sanitizeAndCapitalize } from '../utils/textFormatters';
+import { sanitizeAndCapitalize, formatMoneyInput, parseMoneyToNumber } from '../utils/textFormatters';
 import { PRODUCT_UNITS, normalizeProductUnit } from '../utils/units';
 import { normalizeBrand } from '../utils/brand';
 import { getApiUrl } from '../utils/apiConfig';
@@ -69,6 +69,22 @@ export function ReceiptOcrModal({
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [scannedUrl, setScannedUrl] = useState<string | null>(null);
   const [manualQrUrl, setManualQrUrl] = useState('');
+  const [itemToDelete, setItemToDelete] = useState<OcrExtractedItem | null>(null);
+
+  const errorTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const showErrorMessageTimed = (msg: string) => {
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    setErrorMessage(msg);
+    if (msg) {
+      errorTimerRef.current = setTimeout(() => setErrorMessage(''), 3000);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    };
+  }, []);
 
   // Camera & Viewfinder Controls
   const [zoomLevel, setZoomLevel] = useState<number>(1);
@@ -1060,12 +1076,25 @@ export function ReceiptOcrModal({
                       <div className="w-16">
                         <label className="block text-[9px] uppercase font-bold text-neutral-400">Qtd</label>
                         <input
-                          type="number"
-                          step="any"
-                          min="0.001"
-                          value={item.quantity}
-                          onChange={(e) => handleUpdateItem(item.id, 'quantity', parseFloat(e.target.value) || 0)}
-                          className="w-full px-2 py-1 text-base sm:text-xs font-bold bg-white border border-neutral-200 rounded-lg text-neutral-900 focus:outline-none"
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="1"
+                          value={item.quantity === 0 ? '' : String(item.quantity).replace('.', ',')}
+                          onChange={(e) => {
+                            const valStr = e.target.value.replace(/[^0-9,\.]/g, '');
+                            if (!valStr) {
+                              handleUpdateItem(item.id, 'quantity', 0);
+                              return;
+                            }
+                            const parsed = parseFloat(valStr.replace(',', '.'));
+                            handleUpdateItem(item.id, 'quantity', isNaN(parsed) ? 0 : parsed);
+                          }}
+                          onBlur={() => {
+                            if (!item.quantity || item.quantity <= 0) {
+                              handleUpdateItem(item.id, 'quantity', 1);
+                            }
+                          }}
+                          className="w-full px-2 py-1 text-base sm:text-xs font-bold bg-white border border-neutral-200 rounded-lg text-neutral-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-center"
                         />
                       </div>
 
@@ -1082,15 +1111,23 @@ export function ReceiptOcrModal({
                         </select>
                       </div>
 
-                      <div className="w-20">
+                      <div className="w-24">
                         <label className="block text-[9px] uppercase font-bold text-neutral-400">Preço (R$)</label>
                         <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={item.unitPrice}
-                          onChange={(e) => handleUpdateItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
-                          className="w-full px-2 py-1 text-base sm:text-xs font-bold bg-white border border-neutral-200 rounded-lg text-neutral-900 focus:outline-none"
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="0,00"
+                          value={formatMoneyInput(item.unitPrice)}
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/\D/g, '');
+                            if (!raw || raw === '0' || raw === '00') {
+                              handleUpdateItem(item.id, 'unitPrice', 0);
+                            } else {
+                              const num = parseMoneyToNumber(formatMoneyInput(e.target.value));
+                              handleUpdateItem(item.id, 'unitPrice', num);
+                            }
+                          }}
+                          className="w-full px-2 py-1 text-base sm:text-xs font-bold bg-white border border-neutral-200 rounded-lg text-neutral-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right"
                         />
                       </div>
 
@@ -1103,7 +1140,7 @@ export function ReceiptOcrModal({
 
                       <button
                         type="button"
-                        onClick={() => handleRemoveItem(item.id)}
+                        onClick={() => setItemToDelete(item)}
                         className="p-1.5 text-neutral-400 hover:text-red-600 rounded-lg transition-colors ml-1 cursor-pointer"
                         title="Remover Item"
                       >
@@ -1112,6 +1149,42 @@ export function ReceiptOcrModal({
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Confirmação de Exclusão de Item Individual */}
+        {itemToDelete && (
+          <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl border border-neutral-200 space-y-4 animate-in fade-in zoom-in-95">
+              <div className="flex items-center gap-3 text-red-600">
+                <div className="p-2.5 bg-red-50 rounded-2xl">
+                  <Trash2 size={22} />
+                </div>
+                <h3 className="font-black text-base text-neutral-900">Remover Item?</h3>
+              </div>
+              <p className="text-xs text-neutral-600 leading-relaxed">
+                Tem certeza de que deseja excluir <strong>"{itemToDelete.name || 'este item'}"</strong> da lista de importação do cupom fiscal?
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100">
+                <button
+                  type="button"
+                  onClick={() => setItemToDelete(null)}
+                  className="px-4 py-2 border border-neutral-200 rounded-xl text-xs font-bold text-neutral-700 hover:bg-neutral-50 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleRemoveItem(itemToDelete.id);
+                    setItemToDelete(null);
+                  }}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
+                >
+                  Sim, Remover
+                </button>
               </div>
             </div>
           </div>

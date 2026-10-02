@@ -2325,7 +2325,13 @@ export function useShoppingData() {
       }
     }
 
-    const targetCategoryId = data.categoryId || products.find(p => p.id === id)?.categoryId;
+    const existingCurrent = products.find(p => p.id === id);
+    if (!existingCurrent) {
+      // Product was deleted or not present in catalog, return safely
+      return;
+    }
+
+    const targetCategoryId = data.categoryId || existingCurrent.categoryId || categories[0]?.id;
     if (!targetCategoryId) {
       throw new Error("Todo produto precisa pertencer a uma categoria válida.");
     }
@@ -2334,7 +2340,6 @@ export function useShoppingData() {
       throw new Error("O preço do produto não pode ser negativo.");
     }
 
-    const existingCurrent = products.find(p => p.id === id);
     const targetName = cleanedName !== undefined ? cleanedName : existingCurrent?.name;
     const targetBrand = cleanedBrand !== undefined ? cleanedBrand : (existingCurrent?.brand || '');
 
@@ -2437,6 +2442,41 @@ export function useShoppingData() {
         path: `users/${uid}/products/${id}`
       });
     }
+  };
+
+  const deleteUnusedProducts = async (): Promise<{ deletedCount: number; protectedCount: number }> => {
+    const existingPurchaseIds = new Set(purchases.map(p => p.id));
+    const usedProductIds = new Set(
+      purchases.flatMap(p => (purchaseItems[p.id] || []).map(item => item.productId))
+    );
+
+    const productsToDelete = products.filter(p => !usedProductIds.has(p.id));
+    const protectedProducts = products.filter(p => usedProductIds.has(p.id));
+
+    if (productsToDelete.length === 0) {
+      return { deletedCount: 0, protectedCount: protectedProducts.length };
+    }
+
+    const idsToDeleteSet = new Set(productsToDelete.map(p => p.id));
+    const remainingProducts = products.filter(p => !idsToDeleteSet.has(p.id));
+
+    const uid = user ? user.uid : 'guest';
+    setProducts(remainingProducts);
+    if (user) saveUserData('products', remainingProducts, user.uid);
+
+    if (user && !('isOffline' in user) && isOnline) {
+      try {
+        const batch = writeBatch(db);
+        productsToDelete.forEach(p => {
+          batch.delete(doc(db, 'users', uid, 'products', p.id));
+        });
+        await batch.commit();
+      } catch (err) {
+        console.warn("Direct Firestore bulk product deletion notice:", err);
+      }
+    }
+
+    return { deletedCount: productsToDelete.length, protectedCount: protectedProducts.length };
   };
 
   // --- Purchase CRUD (RN-COM-001 - RN-COM-010) ---
@@ -3161,6 +3201,7 @@ export function useShoppingData() {
     addProduct,
     updateProduct,
     deleteProduct,
+    deleteUnusedProducts,
     addPurchase,
     updatePurchase,
     deletePurchase,

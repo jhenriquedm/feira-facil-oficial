@@ -22,17 +22,23 @@ describe('SEFAZ NFC-e Parser & Data Extractor', () => {
     expect(parseBrlDate('25/09/2026')).toBe('2026-09-25');
   });
 
-  it('cleans obscure fiscal abbreviations into readable titles', () => {
+  it('cleans obscure fiscal abbreviations and strips metadata tails into readable consumer titles', () => {
     expect(cleanProductDescription('FILEZ FGO PERD 1KG')).toBe('Filé Frango Perdigão 1kg');
     expect(cleanProductDescription('ACUC CRIST UNI 1KG')).toBe('Açúcar Cristal União 1kg');
     expect(cleanProductDescription('LEIT COND MOC TP 395G')).toBe('Leite Condensado Moça Tp 395g');
     expect(cleanProductDescription('DESINF PINHO SOL 1L')).toBe('Desinfetante Pinho Sol 1l');
+    expect(cleanProductDescription('Acem Esp Kg Qtde.:0,236 UN: KG Vl. Unit.: 37,95')).toBe('Acem Esp Kg');
+    expect(cleanProductDescription('Ovo Naturaves Bco Gd C 30un Qtde.:1 UN: UN Vl. Unit.: 15,49')).toBe('Ovo Naturaves Bco Gd C 30un');
+    expect(cleanProductDescription('(Código: 789123456) Picanha Friboi Qtde.: 1,5 UN: KG Vl. Total: 85,00')).toBe('Picanha Friboi');
   });
 
-  it('infers correct supermarket categories', () => {
+  it('infers correct supermarket categories including eggs in dairy category', () => {
     expect(inferProductCategory('Filé de Frango Perdigão')).toBe('Açougue');
+    expect(inferProductCategory('Acém Especial Bovino')).toBe('Açougue');
     expect(inferProductCategory('Picanha Friboi')).toBe('Açougue');
     expect(inferProductCategory('Leite Integral Piracanjuba')).toBe('Laticínios');
+    expect(inferProductCategory('Ovo Naturaves Branco Grande 30un')).toBe('Laticínios');
+    expect(inferProductCategory('Ovos Caipiras')).toBe('Laticínios');
     expect(inferProductCategory('Arroz Camil 5kg')).toBe('Mercearia');
     expect(inferProductCategory('Tomate Saladete')).toBe('Hortifruti');
     expect(inferProductCategory('Detergente Ypê')).toBe('Limpeza');

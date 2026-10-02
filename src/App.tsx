@@ -320,6 +320,7 @@ export default function App() {
             addProduct={data.addProduct}
             updateProduct={data.updateProduct}
             deleteProduct={data.deleteProduct}
+            deleteUnusedProducts={data.deleteUnusedProducts}
             purchases={data.purchases}
             purchaseItems={data.purchaseItems}
           />

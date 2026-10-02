@@ -186,15 +186,19 @@ export function Purchases({
         matchedProduct = products.find(p => p.name.trim().toLowerCase() === cleanItemName.toLowerCase());
       }
 
-      let categoryId = categories[0]?.id || 'cat_default';
-      const foundCategory = categories.find(
-        c => c.name.trim().toLowerCase() === item.category.trim().toLowerCase()
-      );
-      if (foundCategory) {
-        categoryId = foundCategory.id;
-      }
+      // Priority for category: matched existing product category > recognized category > first category
+      let categoryId = matchedProduct?.categoryId || categories[0]?.id || 'cat_mercearia';
+      let categoryName = categories.find(c => c.id === categoryId)?.name || 'Geral';
 
       if (!matchedProduct) {
+        const foundCategory = categories.find(
+          c => c.name.trim().toLowerCase() === item.category.trim().toLowerCase()
+        );
+        if (foundCategory) {
+          categoryId = foundCategory.id;
+          categoryName = foundCategory.name;
+        }
+
         try {
           matchedProduct = await addProduct(
             cleanItemName,
@@ -209,6 +213,10 @@ export function Purchases({
           matchedProduct = products.find(
             p => p.name.trim().toLowerCase() === cleanItemName.toLowerCase()
           );
+          if (matchedProduct?.categoryId) {
+            categoryId = matchedProduct.categoryId;
+            categoryName = categories.find(c => c.id === categoryId)?.name || categoryName;
+          }
         }
       }
 
@@ -217,7 +225,7 @@ export function Purchases({
         productName: cleanItemName,
         productBrand: normBrand || normalizeBrand(matchedProduct?.brand) || '',
         categoryId: categoryId,
-        categoryName: foundCategory?.name || item.category || 'Mercearia',
+        categoryName: categoryName,
         unit: item.unit,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
@@ -226,8 +234,7 @@ export function Purchases({
     }
 
     setSelectedPurchaseId(newPurchase.id);
-    setOcrFeedbackMessage(`Cupom fiscal lido com sucesso!\n${data.items.length} itens importados para "${newPurchase.name}".`);
-    setTimeout(() => setOcrFeedbackMessage(null), 6000);
+    showOcrFeedbackTimed(`Cupom fiscal lido com sucesso!\n${data.items.length} itens importados para "${newPurchase.name}".`);
   };
 
   const handleOcrConfirmAddToActivePurchase = async (items: OcrExtractedItem[]) => {
@@ -256,15 +263,18 @@ export function Purchases({
         matchedProduct = products.find(p => p.name.trim().toLowerCase() === cleanItemName.toLowerCase());
       }
 
-      let categoryId = categories[0]?.id || 'cat_default';
-      const foundCategory = categories.find(
-        c => c.name.trim().toLowerCase() === item.category.trim().toLowerCase()
-      );
-      if (foundCategory) {
-        categoryId = foundCategory.id;
-      }
+      let categoryId = matchedProduct?.categoryId || categories[0]?.id || 'cat_mercearia';
+      let categoryName = categories.find(c => c.id === categoryId)?.name || 'Geral';
 
       if (!matchedProduct) {
+        const foundCategory = categories.find(
+          c => c.name.trim().toLowerCase() === item.category.trim().toLowerCase()
+        );
+        if (foundCategory) {
+          categoryId = foundCategory.id;
+          categoryName = foundCategory.name;
+        }
+
         try {
           matchedProduct = await addProduct(
             cleanItemName,
@@ -278,6 +288,10 @@ export function Purchases({
           matchedProduct = products.find(
             p => p.name.trim().toLowerCase() === cleanItemName.toLowerCase()
           );
+          if (matchedProduct?.categoryId) {
+            categoryId = matchedProduct.categoryId;
+            categoryName = categories.find(c => c.id === categoryId)?.name || categoryName;
+          }
         }
       }
 
@@ -286,7 +300,7 @@ export function Purchases({
         productName: cleanItemName,
         productBrand: normBrand || normalizeBrand(matchedProduct?.brand) || '',
         categoryId: categoryId,
-        categoryName: foundCategory?.name || item.category || 'Mercearia',
+        categoryName: categoryName,
         unit: item.unit,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
@@ -294,8 +308,7 @@ export function Purchases({
       });
     }
 
-    setOcrFeedbackMessage(`Cupom fiscal lido com sucesso!\n${items.length} itens foram adicionados à sua lista de compras.`);
-    setTimeout(() => setOcrFeedbackMessage(null), 6000);
+    showOcrFeedbackTimed(`Cupom fiscal lido com sucesso!\n${items.length} itens foram adicionados à sua lista de compras.`);
   };
 
   // Home navigation redirection
@@ -2868,13 +2881,13 @@ export function Purchases({
 
       {/* Toast Feedback for OCR Import */}
       {ocrFeedbackMessage && (
-        <div className="fixed bottom-24 sm:bottom-8 right-4 z-50 p-4 bg-emerald-600 text-white rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-bold animate-in slide-in-from-bottom-3 max-w-md">
-          <CheckCircle2 size={18} className="shrink-0 text-white" />
-          <span className="flex-1 whitespace-pre-line leading-relaxed">{ocrFeedbackMessage}</span>
+        <div className="fixed bottom-24 sm:bottom-8 left-1/2 -translate-x-1/2 z-50 p-4 bg-emerald-600 text-white rounded-2xl shadow-2xl flex items-center justify-center gap-3 text-xs font-bold animate-in slide-in-from-bottom-3 max-w-md w-[92%] sm:w-auto text-center">
+          <CheckCircle2 size={20} className="shrink-0 text-white" />
+          <span className="flex-1 whitespace-pre-line leading-relaxed text-center">{ocrFeedbackMessage}</span>
           <button
             type="button"
             onClick={() => setOcrFeedbackMessage(null)}
-            className="p-1 hover:bg-emerald-700 rounded-lg text-white"
+            className="p-1 hover:bg-emerald-700 rounded-lg text-white shrink-0"
           >
             <X size={14} />
           </button>

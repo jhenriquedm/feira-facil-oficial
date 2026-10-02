@@ -14,14 +14,26 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.5.2',
-  buildNumber: 62,
-  releaseDate: '2026-10-01',
+  version: '1.5.3',
+  buildNumber: 63,
+  releaseDate: '2026-10-02',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.5.3',
+      date: '2026-10-02',
+      highlights: [
+        'Limpeza avançada de descrição do item no OCR eliminando metadados fiscais residuais (Qtde, UN, Vl. Unitário)',
+        'Notificações de sucesso e avisos do cupom centralizados com duração de 3 segundos',
+        'Máscara monetária e edição suave de quantidade na prévia de itens sem zero à esquerda',
+        'Confirmação de segurança antes de remover itens da prévia do cupom fiscal',
+        'Correção de categoria ao finalizar compra com preservação da categoria original (ex: Ovos em Laticínios)',
+        'Botão para excluir todos os produtos não utilizados do catálogo em lote com proteção de itens em compras'
+      ]
+    },
     {
       version: '1.5.2',
       date: '2026-10-01',
