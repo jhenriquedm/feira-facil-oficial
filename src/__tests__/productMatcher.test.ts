@@ -4,20 +4,20 @@ import { Product, Category } from '../types';
 
 describe('Smart Product & Category Matcher Engine', () => {
   const mockCategories: Category[] = [
-    { id: 'cat_acougue', name: 'Açougue', iconName: 'Beef', userId: 'user1', createdAt: '', updatedAt: '' },
-    { id: 'cat_laticinios', name: 'Laticínios & Ovos', iconName: 'Egg', userId: 'user1', createdAt: '', updatedAt: '' },
-    { id: 'cat_hortifruti', name: 'Hortifruti', iconName: 'Apple', userId: 'user1', createdAt: '', updatedAt: '' },
-    { id: 'cat_mercearia', name: 'Mercearia', iconName: 'Package', userId: 'user1', createdAt: '', updatedAt: '' },
-    { id: 'cat_limpeza', name: 'Limpeza', iconName: 'Sparkles', userId: 'user1', createdAt: '', updatedAt: '' },
-    { id: 'cat_bebidas', name: 'Bebidas', iconName: 'Wine', userId: 'user1', createdAt: '', updatedAt: '' }
+    { id: 'cat_acougue', name: 'Açougue', iconName: 'Beef', isActive: true, userId: 'user1', createdAt: '', updatedAt: '' },
+    { id: 'cat_laticinios', name: 'Laticínios & Ovos', iconName: 'Egg', isActive: true, userId: 'user1', createdAt: '', updatedAt: '' },
+    { id: 'cat_hortifruti', name: 'Hortifruti', iconName: 'Apple', isActive: true, userId: 'user1', createdAt: '', updatedAt: '' },
+    { id: 'cat_mercearia', name: 'Mercearia', iconName: 'Package', isActive: true, userId: 'user1', createdAt: '', updatedAt: '' },
+    { id: 'cat_limpeza', name: 'Limpeza', iconName: 'Sparkles', isActive: true, userId: 'user1', createdAt: '', updatedAt: '' },
+    { id: 'cat_bebidas', name: 'Bebidas', iconName: 'Wine', isActive: true, userId: 'user1', createdAt: '', updatedAt: '' }
   ];
 
   const mockProducts: Product[] = [
-    { id: 'prod_acem', name: 'Acém', categoryId: 'cat_acougue', unit: 'Kg', brand: '', lastPrice: 38.0, userId: 'user1', createdAt: '', updatedAt: '' },
-    { id: 'prod_ovos', name: 'Ovos', categoryId: 'cat_laticinios', unit: 'Bandeja', brand: '', lastPrice: 16.0, userId: 'user1', createdAt: '', updatedAt: '' },
-    { id: 'prod_alface', name: 'Alface', categoryId: 'cat_hortifruti', unit: 'Unidade', brand: '', lastPrice: 3.5, userId: 'user1', createdAt: '', updatedAt: '' },
-    { id: 'prod_picanha', name: 'Picanha', categoryId: 'cat_acougue', unit: 'Kg', brand: 'Friboi', lastPrice: 69.9, barcode: '7891234567890', userId: 'user1', createdAt: '', updatedAt: '' },
-    { id: 'prod_arroz', name: 'Arroz', categoryId: 'cat_mercearia', unit: 'Pacote', brand: 'Tio João', lastPrice: 28.0, userId: 'user1', createdAt: '', updatedAt: '' }
+    { id: 'prod_acem', name: 'Acém', categoryId: 'cat_acougue', unit: 'Kg', brand: '', lastPrice: 38.0, isActive: true, userId: 'user1', createdAt: '', updatedAt: '' },
+    { id: 'prod_ovos', name: 'Ovos', categoryId: 'cat_laticinios', unit: 'Bandeja', brand: '', lastPrice: 16.0, isActive: true, userId: 'user1', createdAt: '', updatedAt: '' },
+    { id: 'prod_alface', name: 'Alface', categoryId: 'cat_hortifruti', unit: 'Unidade', brand: '', lastPrice: 3.5, isActive: true, userId: 'user1', createdAt: '', updatedAt: '' },
+    { id: 'prod_picanha', name: 'Picanha', categoryId: 'cat_acougue', unit: 'Kg', brand: 'Friboi', lastPrice: 69.9, barcode: '7891234567890', isActive: true, userId: 'user1', createdAt: '', updatedAt: '' },
+    { id: 'prod_arroz', name: 'Arroz', categoryId: 'cat_mercearia', unit: 'Pacote', brand: 'Tio João', lastPrice: 28.0, isActive: true, userId: 'user1', createdAt: '', updatedAt: '' }
   ];
 
   it('correctly maps lemma and singulars in Portuguese', () => {
@@ -71,7 +71,7 @@ describe('Smart Product & Category Matcher Engine', () => {
 
   it('leaves category empty when no compatible category exists', () => {
     const limitedCategories: Category[] = [
-      { id: 'cat_acougue', name: 'Açougue', iconName: 'Beef', userId: 'user1', createdAt: '', updatedAt: '' }
+      { id: 'cat_acougue', name: 'Açougue', iconName: 'Beef', isActive: true, userId: 'user1', createdAt: '', updatedAt: '' }
     ];
     const cat = findBestMatchingCategory('', 'Livro de Receitas', limitedCategories);
     expect(cat).toBeNull();
