@@ -628,8 +628,7 @@ export function Products({
                     title="Excluir todos os produtos do catálogo que não estão sendo usados em compras"
                   >
                     <Trash2 size={16} className="shrink-0 text-red-600" />
-                    <span className="hidden sm:inline">Excluir Não Utilizados</span>
-                    <span className="sm:hidden">Limpar</span>
+                    <span>Excluir</span>
                   </button>
                 )}
 

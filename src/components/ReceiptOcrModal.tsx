@@ -12,6 +12,7 @@ import { PRODUCT_UNITS, normalizeProductUnit } from '../utils/units';
 import { normalizeBrand } from '../utils/brand';
 import { getApiUrl } from '../utils/apiConfig';
 import { fetchSefazQrCodeData } from '../utils/sefazParser';
+import { findBestMatchingProduct } from '../utils/productMatcher';
 
 export interface OcrExtractedItem {
   id: string;
@@ -24,6 +25,8 @@ export interface OcrExtractedItem {
   brand: string;
   barcode?: string;
   selected: boolean;
+  matchedProductId?: string;
+  matchedProductName?: string;
 }
 
 export interface OcrResultData {
@@ -41,6 +44,7 @@ interface ReceiptOcrModalProps {
   products: Product[];
   activePurchaseId?: string | null;
   activePurchaseName?: string | null;
+  addCategory?: (name: string, iconName: string) => Promise<any>;
   onConfirmNewPurchase?: (data: {
     market: string;
     date: string;
@@ -58,6 +62,7 @@ export function ReceiptOcrModal({
   products,
   activePurchaseId,
   activePurchaseName,
+  addCategory,
   onConfirmNewPurchase,
   onConfirmAddToActivePurchase
 }: ReceiptOcrModalProps) {
@@ -70,6 +75,11 @@ export function ReceiptOcrModal({
   const [scannedUrl, setScannedUrl] = useState<string | null>(null);
   const [manualQrUrl, setManualQrUrl] = useState('');
   const [itemToDelete, setItemToDelete] = useState<OcrExtractedItem | null>(null);
+
+  // Quick category creation inside review modal
+  const [showQuickCatModal, setShowQuickCatModal] = useState(false);
+  const [quickCatName, setQuickCatName] = useState('');
+  const [quickTargetItemId, setQuickTargetItemId] = useState<string | null>(null);
 
   const errorTimerRef = useRef<NodeJS.Timeout | null>(null);
   const showErrorMessageTimed = (msg: string) => {
@@ -473,18 +483,29 @@ export function ReceiptOcrModal({
         throw new Error('Nenhum item de compra foi encontrado nesta consulta da SEFAZ. Verifique se o QR Code é de uma NFC-e válida.');
       }
 
-      const mappedItems: OcrExtractedItem[] = result.items.map((it: any, idx: number) => ({
-        id: `sefaz_${Date.now()}_${idx}`,
-        name: it.name || 'Produto sem nome',
-        quantity: Number(it.quantity) > 0 ? Number(it.quantity) : 1,
-        unit: normalizeProductUnit(it.unit || 'Unidade'),
-        unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0,
-        totalPrice: Number(it.totalPrice) >= 0 ? Number(it.totalPrice) : (Number(it.quantity) * Number(it.unitPrice)),
-        category: it.category || categories[0]?.name || 'Mercearia',
-        brand: normalizeBrand(it.brand),
-        barcode: it.barcode || '',
-        selected: true
-      }));
+      const mappedItems: OcrExtractedItem[] = result.items.map((it: any, idx: number) => {
+        const rawName = it.name || 'Produto sem nome';
+        const rawBrand = normalizeBrand(it.brand);
+        const rawBarcode = it.barcode || '';
+
+        // Match against user's existing catalog & categories
+        const match = findBestMatchingProduct(rawName, rawBrand, rawBarcode, products, categories);
+
+        return {
+          id: `sefaz_${Date.now()}_${idx}`,
+          name: match.matchedProduct ? match.matchedProduct.name : rawName,
+          quantity: Number(it.quantity) > 0 ? Number(it.quantity) : 1,
+          unit: normalizeProductUnit(match.matchedProduct ? match.matchedProduct.unit : (it.unit || 'Unidade')),
+          unitPrice: Number(it.unitPrice) >= 0 ? Number(it.unitPrice) : 0,
+          totalPrice: Number(it.totalPrice) >= 0 ? Number(it.totalPrice) : (Number(it.quantity) * Number(it.unitPrice)),
+          category: match.suggestedCategoryName || '',
+          brand: rawBrand || normalizeBrand(match.matchedProduct?.brand) || '',
+          barcode: rawBarcode || match.matchedProduct?.barcode || '',
+          selected: true,
+          matchedProductId: match.matchedProduct?.id,
+          matchedProductName: match.matchedProduct?.name
+        };
+      });
 
       const detectedMarket = (result.market || 'Supermercado').trim();
       const detectedDate = result.date || new Date().toISOString().substring(0, 10);
@@ -565,25 +586,29 @@ export function ReceiptOcrModal({
       return;
     }
 
-    // Validate that all selected items have valid non-empty fields
+    // Validate that all selected items have valid non-empty fields & categories
     for (const item of selectedItems) {
       if (!item.name || item.name.trim().length < 2) {
-        setErrorMessage('Preencha a descrição de todos os itens da lista antes de salvar.');
+        showErrorMessageTimed('Preencha a descrição de todos os itens da lista antes de salvar.');
+        return;
+      }
+      if (!item.category || !item.category.trim()) {
+        showErrorMessageTimed(`O produto "${item.name}" não possui categoria definida. Selecione ou crie uma categoria antes de salvar.`);
         return;
       }
       if (!item.quantity || item.quantity <= 0) {
-        setErrorMessage(`A quantidade do item "${item.name}" deve ser maior que zero.`);
+        showErrorMessageTimed(`A quantidade do item "${item.name}" deve ser maior que zero.`);
         return;
       }
       if (item.unitPrice === undefined || item.unitPrice < 0) {
-        setErrorMessage(`O preço do item "${item.name}" não pode ser negativo.`);
+        showErrorMessageTimed(`O preço do item "${item.name}" não pode ser negativo.`);
         return;
       }
     }
 
     const cleanTitle = (purchaseTitle.trim() || `Compra ${extractedMarket}`).slice(0, 50);
     if (!activePurchaseId && (cleanTitle.length < 2 || cleanTitle.length > 50)) {
-      setErrorMessage('O nome da lista de compras deve possuir entre 2 e 50 caracteres.');
+      showErrorMessageTimed('O nome da lista de compras deve possuir entre 2 e 50 caracteres.');
       return;
     }
 
@@ -1039,16 +1064,24 @@ export function ReceiptOcrModal({
                       />
                     </div>
 
-                    {/* Product Name & Brand */}
+                    {/* Product Name & Brand & Category */}
                     <div className="flex-1 min-w-[180px]">
                       <input
                         type="text"
                         maxLength={40}
                         value={item.name}
                         onChange={(e) => handleUpdateItem(item.id, 'name', sanitizeAndCapitalize(e.target.value, 40))}
-                        placeholder="Nome do produto"
+                        placeholder="Nome do produto *"
                         className="w-full px-2 py-1 text-base sm:text-xs font-bold bg-white border border-neutral-200 rounded-lg text-neutral-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                       />
+
+                      {item.matchedProductName && (
+                        <div className="mt-1 flex items-center gap-1 text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 w-fit">
+                          <Check size={11} className="shrink-0 text-emerald-600" />
+                          <span>Produto existente: <strong>{item.matchedProductName}</strong></span>
+                        </div>
+                      )}
+
                       <div className="flex items-center gap-2 mt-1">
                         <input
                           type="text"
@@ -1060,13 +1093,25 @@ export function ReceiptOcrModal({
                         />
                         <select
                           value={item.category}
-                          onChange={(e) => handleUpdateItem(item.id, 'category', e.target.value)}
-                          className="w-1/2 px-2 py-0.5 text-base sm:text-[11px] font-semibold bg-white rounded-md border border-neutral-200 text-neutral-700 overflow-y-auto max-h-48 cursor-pointer"
+                          onChange={(e) => {
+                            if (e.target.value === '__NEW_CATEGORY__') {
+                              setQuickTargetItemId(item.id);
+                              setShowQuickCatModal(true);
+                            } else {
+                              handleUpdateItem(item.id, 'category', e.target.value);
+                            }
+                          }}
+                          className={`w-1/2 px-2 py-0.5 text-base sm:text-[11px] font-semibold rounded-md border overflow-y-auto max-h-48 cursor-pointer ${
+                            !item.category
+                              ? 'border-red-400 bg-red-50 text-red-700 font-bold ring-1 ring-red-400'
+                              : 'bg-white border-neutral-200 text-neutral-700'
+                          }`}
                         >
+                          <option value="">-- Categoria * --</option>
                           {categories.map(c => (
                             <option key={c.id} value={c.name}>{c.name}</option>
                           ))}
-                          <option value="Outros">Outros</option>
+                          <option value="__NEW_CATEGORY__">+ Nova Categoria...</option>
                         </select>
                       </div>
                     </div>
@@ -1184,6 +1229,83 @@ export function ReceiptOcrModal({
                   className="px-4 py-2 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
                 >
                   Sim, Remover
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Criação Rápida de Categoria no OCR */}
+        {showQuickCatModal && (
+          <div className="fixed inset-0 z-70 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl border border-neutral-200 space-y-4 animate-in fade-in zoom-in-95">
+              <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+                <h3 className="font-extrabold text-sm text-neutral-900 flex items-center gap-2">
+                  <Tag size={16} className="text-emerald-600" />
+                  <span>Nova Categoria</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowQuickCatModal(false);
+                    setQuickCatName('');
+                    setQuickTargetItemId(null);
+                  }}
+                  className="p-1 hover:bg-neutral-100 rounded-lg text-neutral-400"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-600 mb-1">Nome da Categoria *</label>
+                  <input
+                    type="text"
+                    maxLength={30}
+                    placeholder="Ex: Congelados, Pet Shop, Bebidas"
+                    value={quickCatName}
+                    onChange={(e) => setQuickCatName(sanitizeAndCapitalize(e.target.value, 30))}
+                    className="w-full px-3 py-2 text-xs font-semibold bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowQuickCatModal(false);
+                    setQuickCatName('');
+                    setQuickTargetItemId(null);
+                  }}
+                  className="px-4 py-2 border border-neutral-200 rounded-xl text-xs font-bold text-neutral-700 hover:bg-neutral-50 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const clean = sanitizeAndCapitalize(quickCatName, 30);
+                    if (!clean) return;
+                    try {
+                      if (addCategory) {
+                        await addCategory(clean, 'Package');
+                      }
+                      if (quickTargetItemId) {
+                        handleUpdateItem(quickTargetItemId, 'category', clean);
+                      }
+                      setShowQuickCatModal(false);
+                      setQuickCatName('');
+                      setQuickTargetItemId(null);
+                    } catch (err: any) {
+                      showErrorMessageTimed(err.message || 'Erro ao criar categoria.');
+                    }
+                  }}
+                  disabled={!quickCatName.trim()}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
+                >
+                  Salvar e Aplicar
                 </button>
               </div>
             </div>

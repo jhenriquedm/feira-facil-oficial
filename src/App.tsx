@@ -347,6 +347,7 @@ export default function App() {
             activePurchaseId={activePurchaseId}
             onSelectPurchase={handleSelectPurchase}
             addProduct={data.addProduct}
+            addCategory={data.addCategory}
           />
         )}
 

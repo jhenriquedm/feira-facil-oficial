@@ -21,6 +21,7 @@ import {
   formatWeightValueOnly 
 } from '../utils/units';
 import { normalizeBrand, formatBrandDisplay, isSameBrand } from '../utils/brand';
+import { findBestMatchingProduct } from '../utils/productMatcher';
 
 interface PurchasesProps {
   purchases: Purchase[];
@@ -44,6 +45,7 @@ interface PurchasesProps {
   activePurchaseId?: string | null;
   onSelectPurchase?: (id: string | null) => void;
   addProduct: (name: string, categoryId: string, unit: string, brand: string, lastPrice: number, barcode?: string) => Promise<Product>;
+  addCategory?: (name: string, iconName: string) => Promise<any>;
 }
 
 export function Purchases({
@@ -67,7 +69,8 @@ export function Purchases({
   onClearSelectedPurchaseId,
   activePurchaseId,
   onSelectPurchase,
-  addProduct
+  addProduct,
+  addCategory
 }: PurchasesProps) {
   const [internalPurchaseId, setInternalPurchaseId] = useState<string | null>(
     activePurchaseId ?? selectedPurchaseIdFromHome ?? null
@@ -167,37 +170,43 @@ export function Purchases({
       const normBrand = normalizeBrand(item.brand);
       const cleanBarcode = item.barcode ? item.barcode.trim().replace(/\D/g, '') : '';
 
-      // Check for existing product to prevent duplicate items in catalog
-      let matchedProduct = products.find(p => {
-        if (cleanBarcode && p.barcode && p.barcode.trim().replace(/\D/g, '') === cleanBarcode) {
-          return true;
-        }
-        const sameName = p.name.trim().toLowerCase() === cleanItemName.toLowerCase();
-        if (sameName && isSameBrand(p.brand, normBrand)) {
-          return true;
-        }
-        if (sameName && !normBrand && !p.brand) {
-          return true;
-        }
-        return false;
-      });
-
-      if (!matchedProduct && !normBrand) {
-        matchedProduct = products.find(p => p.name.trim().toLowerCase() === cleanItemName.toLowerCase());
-      }
-
-      // Priority for category: matched existing product category > recognized category > first category
-      let categoryId = matchedProduct?.categoryId || categories[0]?.id || 'cat_mercearia';
-      let categoryName = categories.find(c => c.id === categoryId)?.name || 'Geral';
+      // 1. Look up existing product by pre-matched ID or deep smart matcher
+      let matchedProduct = item.matchedProductId
+        ? products.find(p => p.id === item.matchedProductId)
+        : null;
 
       if (!matchedProduct) {
-        const foundCategory = categories.find(
+        const matchRes = findBestMatchingProduct(cleanItemName, normBrand, cleanBarcode, products, categories);
+        if (matchRes.matchedProduct) {
+          matchedProduct = matchRes.matchedProduct;
+        }
+      }
+
+      // Priority for category: matched existing product category > recognized category
+      let categoryId = matchedProduct?.categoryId;
+      let categoryName = matchedProduct
+        ? categories.find(c => c.id === matchedProduct?.categoryId)?.name || 'Geral'
+        : '';
+
+      if (!matchedProduct) {
+        // Resolve category
+        let foundCategory = categories.find(
           c => c.name.trim().toLowerCase() === item.category.trim().toLowerCase()
         );
-        if (foundCategory) {
-          categoryId = foundCategory.id;
-          categoryName = foundCategory.name;
+
+        // If category is a newly typed category that doesn't exist yet, create it!
+        if (!foundCategory && item.category && item.category.trim() && addCategory) {
+          try {
+            foundCategory = await addCategory(item.category.trim(), 'Package');
+          } catch {
+            foundCategory = categories.find(
+              c => c.name.trim().toLowerCase() === item.category.trim().toLowerCase()
+            );
+          }
         }
+
+        categoryId = foundCategory?.id || categories[0]?.id || 'cat_mercearia';
+        categoryName = foundCategory?.name || item.category || 'Geral';
 
         try {
           matchedProduct = await addProduct(
@@ -222,10 +231,10 @@ export function Purchases({
 
       await addPurchaseItem(newPurchase.id, {
         productId: matchedProduct?.id || `prod_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        productName: cleanItemName,
+        productName: matchedProduct ? matchedProduct.name : cleanItemName,
         productBrand: normBrand || normalizeBrand(matchedProduct?.brand) || '',
-        categoryId: categoryId,
-        categoryName: categoryName,
+        categoryId: categoryId || categories[0]?.id || 'cat_mercearia',
+        categoryName: categoryName || 'Geral',
         unit: item.unit,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
@@ -245,35 +254,40 @@ export function Purchases({
       const normBrand = normalizeBrand(item.brand);
       const cleanBarcode = item.barcode ? item.barcode.trim().replace(/\D/g, '') : '';
 
-      let matchedProduct = products.find(p => {
-        if (cleanBarcode && p.barcode && p.barcode.trim().replace(/\D/g, '') === cleanBarcode) {
-          return true;
-        }
-        const sameName = p.name.trim().toLowerCase() === cleanItemName.toLowerCase();
-        if (sameName && isSameBrand(p.brand, normBrand)) {
-          return true;
-        }
-        if (sameName && !normBrand && !p.brand) {
-          return true;
-        }
-        return false;
-      });
-
-      if (!matchedProduct && !normBrand) {
-        matchedProduct = products.find(p => p.name.trim().toLowerCase() === cleanItemName.toLowerCase());
-      }
-
-      let categoryId = matchedProduct?.categoryId || categories[0]?.id || 'cat_mercearia';
-      let categoryName = categories.find(c => c.id === categoryId)?.name || 'Geral';
+      // 1. Look up existing product by pre-matched ID or deep smart matcher
+      let matchedProduct = item.matchedProductId
+        ? products.find(p => p.id === item.matchedProductId)
+        : null;
 
       if (!matchedProduct) {
-        const foundCategory = categories.find(
+        const matchRes = findBestMatchingProduct(cleanItemName, normBrand, cleanBarcode, products, categories);
+        if (matchRes.matchedProduct) {
+          matchedProduct = matchRes.matchedProduct;
+        }
+      }
+
+      let categoryId = matchedProduct?.categoryId;
+      let categoryName = matchedProduct
+        ? categories.find(c => c.id === matchedProduct?.categoryId)?.name || 'Geral'
+        : '';
+
+      if (!matchedProduct) {
+        let foundCategory = categories.find(
           c => c.name.trim().toLowerCase() === item.category.trim().toLowerCase()
         );
-        if (foundCategory) {
-          categoryId = foundCategory.id;
-          categoryName = foundCategory.name;
+
+        if (!foundCategory && item.category && item.category.trim() && addCategory) {
+          try {
+            foundCategory = await addCategory(item.category.trim(), 'Package');
+          } catch {
+            foundCategory = categories.find(
+              c => c.name.trim().toLowerCase() === item.category.trim().toLowerCase()
+            );
+          }
         }
+
+        categoryId = foundCategory?.id || categories[0]?.id || 'cat_mercearia';
+        categoryName = foundCategory?.name || item.category || 'Geral';
 
         try {
           matchedProduct = await addProduct(
@@ -297,10 +311,10 @@ export function Purchases({
 
       await addPurchaseItem(selectedPurchaseId, {
         productId: matchedProduct?.id || `prod_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        productName: cleanItemName,
+        productName: matchedProduct ? matchedProduct.name : cleanItemName,
         productBrand: normBrand || normalizeBrand(matchedProduct?.brand) || '',
-        categoryId: categoryId,
-        categoryName: categoryName,
+        categoryId: categoryId || categories[0]?.id || 'cat_mercearia',
+        categoryName: categoryName || 'Geral',
         unit: item.unit,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
@@ -2902,6 +2916,7 @@ export function Purchases({
         products={products}
         activePurchaseId={ocrTargetMode === 'activePurchase' ? selectedPurchaseId : null}
         activePurchaseName={ocrTargetMode === 'activePurchase' ? activePurchase?.name : null}
+        addCategory={addCategory}
         onConfirmNewPurchase={handleOcrConfirmNewPurchase}
         onConfirmAddToActivePurchase={handleOcrConfirmAddToActivePurchase}
       />

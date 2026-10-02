@@ -14,14 +14,25 @@ export interface AppVersionInfo {
 }
 
 export const APP_VERSION_INFO: AppVersionInfo = {
-  version: '1.5.3',
-  buildNumber: 63,
+  version: '1.5.4',
+  buildNumber: 64,
   releaseDate: '2026-10-02',
   codename: 'MercadoFácil Pro',
   minAndroidVersion: 'Android 8.0 (API 26)',
   targetSdkVersion: 34,
   packageId: 'com.feirafacil.app',
   changelog: [
+    {
+      version: '1.5.4',
+      date: '2026-10-02',
+      highlights: [
+        'Renomeado botão de ação na aba de produtos para "Excluir"',
+        'Motor inteligente de correspondência no OCR da SEFAZ para evitar produtos duplicados no catálogo',
+        'Associação automática de variações (ex: "Acem Esp Kg" -> "Acém", "Ovo Naturaves Bco Gd C 30un" -> "Ovos")',
+        'Herança automática da categoria cadastrada no produto ("Laticínios & Ovos", "Açougue", etc.)',
+        'Exigência de categoria válida antes de salvar e criação rápida de novas categorias no modal do cupom'
+      ]
+    },
     {
       version: '1.5.3',
       date: '2026-10-02',
